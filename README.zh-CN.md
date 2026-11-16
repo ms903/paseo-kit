@@ -29,7 +29,7 @@
 - 弹出层：日 / 周 / 月总量、与上一周期的对比、堆叠柱状图；日视图另附典型一天与日均消耗。
 - 完整的 **Token usage** 页面（也可从 Command Center 打开）：30 天 / 12 周 / 12 个月历史、每百万 token 成本、缓存命中率、按 agent 和模型拆分、最近的 session。
 - 每个 agent 的输入框上方有一个 pill，显示当前 provider session 的 token 总量。
-- 统计 ccusage 支持的所有 agent（Claude Code、Codex、Gemini CLI、OpenCode、Amp 等）。费用为按 API 标价离线估算，不向外发送任何数据。
+- 统计 ccusage 支持的所有 agent（Claude Code、Codex、Gemini CLI、OpenCode、Amp 等）。费用按官方公开 API 单价计算。
 
 ### file-download
 
@@ -111,10 +111,10 @@
 把下面这段提示词复制给运行在目标机器上的 Paseo agent，它会从 GitHub 安装或更新全部插件。只想装其中几个时，把第 3 步里其他 ID 删掉即可。
 
 ```text
-请在本机的 Paseo daemon 上安装 https://github.com/a31521424/paseo-kit 中的 Paseo 插件。全程不要重启 Paseo daemon，否则会杀掉正在运行的 agent。
+请在本机的 Paseo daemon 上安装 https://github.com/ms903/paseo-kit 中的 Paseo 插件。全程不要重启 Paseo daemon，否则会杀掉正在运行的 agent。
 1. 执行 `paseo --version`，版本必须 ≥ 0.11.1。执行 `npm --version`，npm 必须在 daemon 的 PATH 中，因为 ccusage-stats 安装时会执行 `npm ci --omit=dev`。
 2. 从 `paseo daemon status --json` 取得 `home`，读取 `<home>/config.json` 中的 `pluginsEnabled`（缺失视为 false）。如果不是 true，先停下来征求我的同意，并提醒我：插件是受信任、无沙箱的代码，可以访问这台机器。我同意后，只把该字段设为 true，保留文件其余内容，然后执行 `paseo reload --json`。
-3. 执行 `paseo plugin ls`。对 `host-monitor`、`ccusage-stats`、`file-download`、`tab-recovery` 和 `media-studio` 每个 ID 分别处理：未安装则执行 `paseo plugin install github:a31521424/paseo-kit:plugins/<id>`；SOURCE 已经是本 GitHub 仓库则执行 `paseo plugin update <id> --yes`；从其他来源安装的，先问我再决定是否删除重装。
+3. 执行 `paseo plugin ls`。对 `host-monitor`、`ccusage-stats`、`file-download`、`tab-recovery` 和 `media-studio` 每个 ID 分别处理：未安装则执行 `paseo plugin install github:ms903/paseo-kit:plugins/<id>`；SOURCE 已经是本 GitHub 仓库则执行 `paseo plugin update <id> --yes`；从其他来源安装的，先问我再决定是否删除重装。
 4. 执行 `paseo plugin ls`，每个插件都必须是 `running` 且没有错误。失败时把错误信息和 `paseo plugin logs <id>` 的输出给我。
 5. 汇报每个插件的 SOURCE 和 REVISION。
 ```
@@ -122,11 +122,11 @@
 ### 从 GitHub 安装
 
 ```bash
-paseo plugin install github:a31521424/paseo-kit:plugins/host-monitor
-paseo plugin install github:a31521424/paseo-kit:plugins/ccusage-stats
-paseo plugin install github:a31521424/paseo-kit:plugins/file-download
-paseo plugin install github:a31521424/paseo-kit:plugins/tab-recovery
-paseo plugin install github:a31521424/paseo-kit:plugins/media-studio
+paseo plugin install github:ms903/paseo-kit:plugins/host-monitor
+paseo plugin install github:ms903/paseo-kit:plugins/ccusage-stats
+paseo plugin install github:ms903/paseo-kit:plugins/file-download
+paseo plugin install github:ms903/paseo-kit:plugins/tab-recovery
+paseo plugin install github:ms903/paseo-kit:plugins/media-studio
 ```
 
 `ccusage-stats` 在 manifest 中声明了 `build: [["npm", "ci", "--omit=dev"]]`，Paseo 会按锁文件安装内置的 ccusage 二进制。其他插件只用 Paseo 提供的库。之后用 `paseo plugin update <id>` 更新。
@@ -134,7 +134,7 @@ paseo plugin install github:a31521424/paseo-kit:plugins/media-studio
 ### 从本地克隆安装
 
 ```bash
-git clone https://github.com/a31521424/paseo-kit.git
+git clone https://github.com/ms903/paseo-kit.git
 cd paseo-kit
 npm run install:all
 
@@ -203,3 +203,13 @@ Paseo 插件是**受信任、无沙箱**的代码。服务端代码作为 daemon
 ## 许可证
 
 采用 [Apache License 2.0](LICENSE)，与 [Paseo](https://github.com/getpaseo/paseo) 一致，另见 [NOTICE](NOTICE)。第三方依赖遵循各自的许可证，见上方[依赖](#依赖)一节。
+
+## 此 fork 的改进
+
+- ccusage-stats 支持 Antigravity App、IDE 和 CLI 的本地会话数据库，统计输入、输出、缓存 token，并按 Google 和 Anthropic 官方公开单价计算费用。
+- 媒体上传采用独立任务 ID、完整内容指纹、排他文件发布和续传状态日志。
+- 媒体扫描限制条目数、深度、时间和并发；自动回合扫描、输入框扫描默认关闭，SSH 主机由设置明确指定。
+- 远程文件操作需要 Python 3；媒体播放仍由远程 ffmpeg 执行。
+- 下载支持流式写盘、取消；无流式保存能力时，内存拼接上限为 64 MiB。
+- 媒体设置中可查看存储用量并清理预览缓存及过期上传。配额：预览缓存 1 GiB、笔记 64 MiB、已跟踪保存帧总计 1 GiB（每目录 512 MiB）、未完成上传 16 GiB / 64 个任务。
+- Antigravity 读取需要 Node.js 22.13 及以上；开发检查：`npm test` 和 `npm run typecheck`。

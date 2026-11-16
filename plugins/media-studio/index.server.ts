@@ -23,6 +23,8 @@ import {
   probeRpc,
   statRpc,
   statusRpc,
+  storageRpc,
+  storageCleanRpc,
   streamCloseRpc,
   streamOpenRpc,
   streamReadRpc,
@@ -38,8 +40,10 @@ import { DEFAULT_SETTINGS, settingsDefinition, type MediaStudioSettings } from "
 import { registerAgentFeatures } from "./server/agent";
 import { loudness } from "./server/loudness";
 import { addNote, listNotes, removeNote } from "./server/notes";
-import { startCacheTrimmer } from "./server/cache";
-import { listFolder, listRecent, uniquePath } from "./server/files";
+import { cleanupFrames, saveFrame } from "./server/frames";
+import { storageUsage } from "./server/storage";
+import { clearCache, startCacheTrimmer } from "./server/cache";
+import { listFolder, listRecent } from "./server/files";
 import {
   allowedRemoteHosts,
   closeRemoteHosts,
@@ -94,6 +98,13 @@ export default function contribute(server: PluginServerContext) {
   const transfers = createTransfers();
   const stopTrimmer = startCacheTrimmer();
 
+  server.handle(storageRpc, storageUsage);
+  server.handle(storageCleanRpc, async () => {
+    await clearCache();
+    await transfers.sweepStale();
+    await cleanupFrames();
+    return storageUsage();
+  });
   server.handle(statusRpc, async () => ({
     local: await localHost.tools(),
     home: os.homedir(),
@@ -155,16 +166,14 @@ export default function contribute(server: PluginServerContext) {
     await dir.host.mkdirp(dir.path);
     const stem = path.basename(source.path, path.extname(source.path));
     const stamp = formatTimecode(time, info.fps).replace(/:/g, "-");
-    const target = await uniquePath(dir.host, dir.path, `${stem}_${stamp}.png`);
     const png = await framePng(source, time);
-    await dir.host.createEmpty(target);
-    await dir.host.writeAt(target, 0, png);
+    const target = await saveFrame(dir, `${stem}_${stamp}.png`, png);
     // The app attaches a smaller JPEG to the prompt; the PNG stays in the workspace at full size.
     const preview = await frame(source, time, 1280);
     return { path: target, ...preview };
   });
 
-  server.handle(uploadBeginRpc, async ({ dir, name, size, lastModified }) => transfers.begin(await locate(dir), { name, size, lastModified }));
+  server.handle(uploadBeginRpc, async ({ dir, name, size, lastModified, uploadId, fingerprint }) => transfers.begin(await locate(dir), { name, size, lastModified, uploadId, fingerprint }));
   server.handle(uploadPendingRpc, async ({ root }) => ({ uploads: await transfers.pending(root ? (await locate(root)).ref : null) }));
   server.handle(uploadWriteRpc, (input) => transfers.write(input));
   server.handle(uploadFinishRpc, (input) => transfers.finish(input));

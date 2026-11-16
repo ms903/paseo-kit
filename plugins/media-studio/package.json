@@ -6,7 +6,7 @@
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/a31521424/paseo-kit.git",
+    "url": "git+https://github.com/ms903/paseo-kit.git",
     "directory": "plugins/media-studio"
   },
   "files": [

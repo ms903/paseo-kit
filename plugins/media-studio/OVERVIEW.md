@@ -2,7 +2,7 @@ Review the images, video and audio your agents make without leaving Paseo. Built
 
 ## In the chat
 
-Agents get a `preview_media` tool. When an agent renders a cut, extracts a frame or mixes audio, it can show the file in the chat right away: a card with a player, a filmstrip and an audio waveform. After each turn, one card below the agent's reply collects the media the turn showed and any media files it created or changed in the agent's folder, so nothing is missed even when the agent forgets to show a file.
+Agents get a `preview_media` tool. When an agent renders a cut, extracts a frame or mixes audio, it can show the file in the chat right away: a card with a player, a filmstrip and an audio waveform. When enabled in settings, after each turn one card below the agent's reply collects the media the turn showed and any media files it created or changed in the agent's folder, so nothing is missed even when the agent forgets to show a file.
 
 ## The player
 
@@ -20,7 +20,7 @@ Sent notes are kept per file on the daemon host, listed with the player and pinn
 
 ## The Media panel
 
-A workspace panel, also available in the Explorer, lists recent media files under the workspace, newest first, or browses folders; linked files and folders (footage linked in from a shared drive) are included. Upload files from your computer with the Upload button or by dropping them on the panel; they go to the folder you are browsing, or to `uploads` from the Recent view. Uploads resume: when the connection drops or the plugin reloads, an upload waits and continues by itself; after a page reload the panel lists unfinished uploads, and picking or dropping the same file again continues where it stopped. Uploads can be paused, and unfinished ones are kept on the host for three days. Downloads of large files are written to disk as they arrive in Chrome, Edge and the desktop app, and a dropped piece is fetched again. Transfers move in 4 MB pieces over the Paseo connection, so they work through direct connections, reverse proxies and tunnels, with no extra port.
+A workspace panel, also available in the Explorer, lists recent media files under the workspace, newest first, or browses folders; linked media files are included. Upload files from your computer with the Upload button or by dropping them on the panel; they go to the folder you are browsing, or to `uploads` from the Recent view. Uploads resume: when the connection drops or the plugin reloads, an upload waits and continues by itself; after a page reload the panel lists unfinished uploads, and selecting an unfinished upload and picking its file continues where it stopped. Uploads can be paused, and unfinished ones are kept on the host for three days. Downloads of large files are written to disk as they arrive in Chrome, Edge and the desktop app, and a dropped piece is fetched again. Transfers move in 4 MB pieces over the Paseo connection, so they work through direct connections, reverse proxies and tunnels, with no extra port.
 
 Video, audio and images that Paseo's own image viewer does not open (TIFF, EXR, DPX, HEIC and others) also open in the file tab from the Explorer. Type `/media path` in the composer to show a file in the panel.
 
@@ -39,3 +39,8 @@ The SSH key must work without a password prompt. All commands for a host share o
 - The tool is given to Claude, Codex and OpenCode agents by default; change the providers or turn it off in settings. Turning it on or off applies when sessions reopen.
 - Thumbnails, filmstrips and waveforms are cached under `~/.cache/paseo-media-studio` on the host, up to 1 GB.
 - The card after a turn lives in the daemon's memory and is gone after a daemon restart; the files are not.
+
+Automatic turn cards and composer scans are disabled by default. Enable them in settings.
+SSH hosts use an explicit alias list and require Python 3 for portable filesystem operations.
+Storage usage and cleanup are in Media studio settings: preview cache 1 GiB, notes 64 MiB,
+saved frames 1 GiB across tracked files (512 MiB per folder), unfinished uploads 16 GiB / 64 tasks.

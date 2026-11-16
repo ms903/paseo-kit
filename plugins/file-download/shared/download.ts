@@ -3,7 +3,7 @@ import { z } from "zod";
 
 /** Bytes per chunk; base64 keeps each RPC message under 6 MB, small enough for relays and proxies. */
 export const CHUNK_BYTES = 4 * 1024 * 1024;
-/** Largest file the plugin assembles in the browser's memory. */
+/** Largest file the daemon serves per download. */
 export const MAX_FILE_BYTES = 1024 * 1024 * 1024;
 
 /** This daemon's server ID, so only the host that owns the open file answers the shortcut. */

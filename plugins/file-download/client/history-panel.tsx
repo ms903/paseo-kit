@@ -4,6 +4,7 @@ import { copyText, FlatList, Icon, useToast } from "@getpaseo/plugin/client/reac
 import { ActivityIndicator, Pressable, Text, View } from "react-native";
 import {
   clearFinishedRecords,
+  cancelDownload,
   downloadFile,
   removeRecord,
   useDownloadRecords,
@@ -81,7 +82,7 @@ function RecordRow({
         : "Preparing"
       : record.status === "failed"
         ? `Failed: ${record.error ?? "unknown error"}`
-        : `${formatBytes(record.total)} · ${formatAgo(record.startedAt)}`;
+        : record.status === "canceled" ? "Canceled" : `${formatBytes(record.total)} · ${formatAgo(record.startedAt)}`;
   return (
     <View
       style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: compact ? 12 : 16, paddingVertical: 8 }}
@@ -131,9 +132,8 @@ function RecordRow({
       <RowButton
         theme={theme}
         icon="X"
-        label={`Remove ${record.name} from the list`}
-        disabled={record.status === "downloading"}
-        onPress={() => removeRecord(record.id)}
+        label={record.status === "downloading" ? `Cancel ${record.name}` : `Remove ${record.name} from the list`}
+        onPress={() => record.status === "downloading" ? cancelDownload(record.id) : removeRecord(record.id)}
       />
     </View>
   );

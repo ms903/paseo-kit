@@ -195,9 +195,7 @@ const rangesSchema = z.array(z.tuple([z.number().int().nonnegative(), z.number()
 export type ByteRange = [number, number];
 
 /**
- * Starts or resumes an upload. The same file (name, size, modification time) to the same folder
- * always gets the same upload, so after a dropped connection, a page reload or a daemon restart the
- * answer lists the ranges already on the host and the app sends only the rest.
+ * Starts a new upload, or resumes an explicit upload ID with the ranges already on the host.
  */
 export const uploadBeginRpc = defineRpc({
   name: "upload.begin",
@@ -207,6 +205,8 @@ export const uploadBeginRpc = defineRpc({
     name: z.string().min(1).max(255),
     size: z.number().int().nonnegative(),
     lastModified: z.number().int().nonnegative().nullish(),
+    uploadId: z.string().nullish(),
+    fingerprint: z.string().regex(/^sha256-tree-v1:[a-f0-9]{64}$/),
   }),
   output: z.object({ uploadId: z.string(), received: rangesSchema, receivedBytes: z.number(), resumed: z.boolean() }),
 });
@@ -318,3 +318,7 @@ export const projectSummaryRpc = defineRpc({
   }),
   output: z.object({ projects: z.array(projectSummarySchema) }),
 });
+
+const storageSchema = z.object({ cacheBytes: z.number(), noteBytes: z.number(), frameBytes: z.number(), uploadReservedBytes: z.number(), unfinishedUploads: z.number() });
+export const storageRpc = defineRpc({ name: "storage.usage", input: z.object({}), output: storageSchema });
+export const storageCleanRpc = defineRpc({ name: "storage.clean", input: z.object({}), output: storageSchema });

@@ -18,14 +18,14 @@ export const settingsDefinition = defineSettings({
     /** Comma-separated provider IDs that receive the tool. */
     agentToolProviders: z.string().default("claude, codex, opencode"),
     /** Add a card after each turn listing the media files the turn created or changed. */
-    turnCards: z.boolean().default(true),
+    turnCards: z.boolean().default(false),
     /** A pill in the composer of agents whose folder holds media, opening the media panel. */
-    composerPill: z.boolean().default(true),
+    composerPill: z.boolean().default(false),
     quality: z.enum(["auto", "original", "1080", "720", "480"]).default("auto"),
     /** Convert with VideoToolbox (Mac) or NVENC (NVIDIA) when the host has a working one. */
     hardwareEncoding: z.boolean().default(true),
     /** SSH hosts whose files can be previewed as alias:/path. `*`: every alias in ~/.ssh/config. Empty: none. */
-    remoteHosts: z.string().default("*"),
+    remoteHosts: z.string().default(""),
     /** ffmpeg on SSH hosts where it is not found by itself: `alias=/path/to/ffmpeg`, comma-separated. */
     remoteFfmpeg: z.string().default(""),
   }),

@@ -166,7 +166,14 @@
     "saveHint": "Save the text fields above.",
     "save": "Save",
     "remoteFfmpeg": "ffmpeg on SSH hosts",
-    "remoteFfmpegHint": "Only for hosts where ffmpeg is not found by itself: alias=/path/to/ffmpeg, comma-separated. PATH, common folders and the ffmpeg bundled with the imageio-ffmpeg Python package are searched first."
+    "remoteFfmpegHint": "Only for hosts where ffmpeg is not found by itself: alias=/path/to/ffmpeg, comma-separated. PATH, common folders and the ffmpeg bundled with the imageio-ffmpeg Python package are searched first.",
+    "storageTitle": "Storage",
+    "cache": "Preview cache",
+    "notes": "Review notes",
+    "frames": "Saved frames",
+    "uploads": "Unfinished uploads",
+    "cleanup": "Preview cache and expired uploads",
+    "clean": "Clean"
   },
   "pending": {
     "title": "Unfinished uploads",

@@ -3,9 +3,10 @@ import { constants, promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { Readable, Writable } from "node:stream";
-import { IMAGE_EXTENSIONS, AUDIO_EXTENSIONS, VIDEO_EXTENSIONS, mediaKindOf, type MediaKind } from "../shared/media";
+import { IMAGE_EXTENSIONS, AUDIO_EXTENSIONS, VIDEO_EXTENSIONS, mediaKindOf } from "../shared/media";
+import { REMOTE_SCAN } from "./remote-scan";
 import { run, type RunResult } from "./ffmpeg";
-import { dropSourceCode, scanMedia as scanLocal, type ScannedFile } from "./files";
+import { scanMedia as scanLocal, type ScannedFile } from "./files";
 
 // Media can live on the daemon host or on a machine the daemon reaches over SSH, such as a GPU
 // server an agent renders on. A remote file is written `alias:/absolute/path`, with an alias from
@@ -51,9 +52,10 @@ export interface MediaHost {
   writeAt(file: string, offset: number, data: Buffer): Promise<void>;
   createEmpty(file: string): Promise<void>;
   mkdirp(dir: string): Promise<void>;
-  rename(from: string, to: string): Promise<void>;
+  publishExclusive(from: string, to: string): Promise<boolean>;
+  sameFile(from: string, to: string): Promise<boolean>;
   remove(file: string): Promise<void>;
-  listDir(dir: string): Promise<DirEntry[]>;
+  listDir(dir: string): Promise<{ entries: DirEntry[]; truncated: boolean }>;
   scan(root: string): Promise<{ files: ScannedFile[]; truncated: boolean }>;
   home(): Promise<string>;
 }
@@ -186,31 +188,44 @@ export const localHost: MediaHost = {
     }
   },
   async createEmpty(file) {
-    await fs.writeFile(file, "");
+    await fs.writeFile(file, "", { flag: "wx" });
   },
   async mkdirp(dir) {
     await fs.mkdir(dir, { recursive: true });
   },
-  async rename(from, to) {
-    await fs.rename(from, to);
+  async publishExclusive(from, to) {
+    try { await fs.link(from, to); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "EEXIST") return false;
+      throw error;
+    }
+    return true;
+  },
+  async sameFile(from, to) {
+    const [a,b] = await Promise.all([fs.stat(from).catch(() => null), fs.stat(to).catch(() => null)]);
+    return !!a && !!b && a.dev === b.dev && a.ino === b.ino;
   },
   async remove(file) {
-    await fs.unlink(file).catch(() => undefined);
+    await fs.unlink(file).catch((error: NodeJS.ErrnoException) => { if (error.code !== "ENOENT") throw error; });
   },
   async listDir(dir) {
-    const entries = await fs.readdir(dir, { withFileTypes: true }).catch((error: NodeJS.ErrnoException) => {
-      throw new Error(error.code === "ENOENT" ? `Folder not found: ${dir}` : error.message);
-    });
+    const handle = await fs.opendir(dir);
     const result: DirEntry[] = [];
-    await Promise.all(
-      entries.map(async (entry) => {
-        if (entry.name.startsWith(".")) return;
+    let seen = 0;
+    const deadline = Date.now() + 2000;
+    try {
+      while (seen < 20_000 && Date.now() < deadline) {
+        const entry = await handle.read();
+        if (!entry) break;
+        seen += 1;
+        if (entry.name.startsWith(".")) continue;
         const stats = await fs.stat(path.join(dir, entry.name)).catch(() => null);
-        if (!stats || (!stats.isDirectory() && !stats.isFile())) return;
+        if (!stats || (!stats.isDirectory() && !stats.isFile())) continue;
         result.push({ name: entry.name, isDirectory: stats.isDirectory(), size: stats.size, mtimeMs: stats.mtimeMs });
-      }),
-    );
-    return result;
+      }
+    } finally { await handle.close(); }
+
+    return { entries: result, truncated: seen >= 20_000 || Date.now() >= deadline };
   },
   scan(root) {
     return scanLocal(root);
@@ -521,7 +536,7 @@ class RemoteHost implements MediaHost {
 
   async stat(file: string): Promise<FileStat | null> {
     const result = await this.script(
-      `if out=$(stat -c '%s %Y %F' -- "$1" 2>/dev/null); then echo "$out"; else stat -f '%z %m %HT' -- "$1" 2>/dev/null; fi`,
+      `if out=$(stat -L -c '%s %Y %F' -- "$1" 2>/dev/null); then echo "$out"; else stat -L -f '%z %m %HT' -- "$1" 2>/dev/null; fi`,
       [file],
     );
     const line = result.stdout.toString().trim();
@@ -550,65 +565,47 @@ class RemoteHost implements MediaHost {
   }
 
   async createEmpty(file: string): Promise<void> {
-    await this.check(`: > "$1"`, [file], "creating a file");
+    await this.check(`set -C; : > "$1"`, [file], "creating a file");
   }
 
   async mkdirp(dir: string): Promise<void> {
     await this.check(`mkdir -p -- "$1"`, [dir], "creating a folder");
   }
 
-  async rename(from: string, to: string): Promise<void> {
-    await this.check(`mv -f -- "$1" "$2"`, [from, to], "renaming");
+  async publishExclusive(from: string, to: string): Promise<boolean> {
+    const result = await this.run("python3", ["-c", "import os,sys\ntry: os.link(sys.argv[1],sys.argv[2])\nexcept FileExistsError: sys.exit(17)", from, to]);
+    if (result.code === 17) return false;
+    if (result.code !== 0) throw new Error(`${this.id}: could not publish file: ${result.stderr}`);
+    return true;
+  }
+
+  async sameFile(from: string, to: string): Promise<boolean> {
+    const result = await this.run("python3", ["-c", "import os,sys\ntry: same=os.path.samefile(sys.argv[1],sys.argv[2])\nexcept FileNotFoundError: same=False\nsys.exit(0 if same else 1)", from, to]);
+    if (result.code === 0) return true;
+    if (result.code === 1 && !result.stderr) return false;
+    throw new Error(`${this.id}: could not compare published file`);
   }
 
   async remove(file: string): Promise<void> {
-    await this.script(`rm -f -- "$1"`, [file]).catch(() => undefined);
+    await this.check(`rm -f -- "$1"`, [file], "removing a file");
   }
 
-  async listDir(dir: string): Promise<DirEntry[]> {
-    const result = await this.script(
-      [
-        `[ -d "$1" ] || { echo "Folder not found: $1" >&2; exit 3; }`,
-        `if find "$1" -maxdepth 0 -printf '' 2>/dev/null; then`,
-        `  find -L "$1" -mindepth 1 -maxdepth 1 ! -name '.*' \\( -type f -o -type d \\) -printf '%y\\t%s\\t%T@\\t%f\\n' 2>/dev/null`,
-        `else`,
-        `  for f in "$1"/*; do [ -e "$f" ] && stat -L -f '%HT%t%z%t%m%t%N' -- "$f"; done`,
-        `fi`,
-      ].join("\n"),
-      [dir],
-      { timeoutMs: 30_000 },
-    );
-    if (result.code === 3) throw new Error(`Folder not found: ${refOf(this, dir)}`);
-    return result.stdout
-      .toString()
-      .split("\n")
-      .filter(Boolean)
-      .map((line) => {
-        const [type = "", size = "0", mtime = "0", ...rest] = line.split("\t");
-        const name = path.basename(rest.join("\t"));
-        const isDirectory = type === "d" || type.toLowerCase() === "directory";
-        return { name, isDirectory, size: Number(size), mtimeMs: Number(mtime) * 1000 };
-      })
-      .filter((entry) => entry.name);
+  async listDir(dir: string): Promise<{ entries: DirEntry[]; truncated: boolean }> {
+    const result = await this.run("python3", ["-c", REMOTE_SCAN, dir, JSON.stringify(MEDIA_GLOBS), "folder"], { timeoutMs: 10_000, maxBytes: 8 * 1024 * 1024 });
+    if (result.code !== 0) throw new Error(`${this.id}: folder scan failed: ${result.stderr}`);
+    const data = JSON.parse(result.stdout.toString()) as { files: DirEntry[]; truncated: boolean };
+    return { entries: data.files, truncated: data.truncated };
   }
 
   async scan(root: string): Promise<{ files: ScannedFile[]; truncated: boolean }> {
-    const names = MEDIA_GLOBS.map((ext) => `-iname '*.${ext}'`).join(" -o ");
-    const prune = `\\( -name '.*' -o -name node_modules -o -name __pycache__ -o -name venv -o -name site-packages \\) -prune`;
-    const result = await this.script(
-      `find -L "$1" -mindepth 1 -maxdepth 8 ${prune} -o -type f \\( ${names} \\) -printf '%s\\t%T@\\t%p\\n' 2>/dev/null | head -n 20001`,
-      [root],
-      { timeoutMs: 30_000 },
-    );
-    const lines = result.stdout.toString().split("\n").filter(Boolean);
-    const files: ScannedFile[] = [];
-    for (const line of lines.slice(0, 20_000)) {
-      const [size = "0", mtime = "0", ...rest] = line.split("\t");
-      const file = rest.join("\t");
-      const kind: MediaKind | null = mediaKindOf(file);
-      if (kind) files.push({ path: file, kind, size: Number(size), mtimeMs: Number(mtime) * 1000 });
-    }
-    return { files: await dropSourceCode(files, (entry) => entry, (entry, length) => this.readRange(entry, 0, length)), truncated: lines.length > 20_000 };
+    const result = await this.run("python3", ["-c", REMOTE_SCAN, root, JSON.stringify(MEDIA_GLOBS), "scan"], { timeoutMs: 10_000, maxBytes: 8 * 1024 * 1024 });
+    if (result.code !== 0) throw new Error(`${this.id}: media scan failed: ${result.stderr}`);
+    const data = JSON.parse(result.stdout.toString()) as { files: { path: string; size: number; mtimeMs: number }[]; truncated: boolean };
+    const files = data.files.flatMap((file) => {
+      const kind = mediaKindOf(file.path);
+      return kind ? [{ ...file, kind }] : [];
+    });
+    return { files, truncated: data.truncated };
   }
 
   home(): Promise<string> {
@@ -623,7 +620,7 @@ class RemoteHost implements MediaHost {
 }
 
 const remoteHosts = new Map<string, RemoteHost>();
-let allowedSetting = "*";
+let allowedSetting = "";
 let aliasCache: { at: number; aliases: Promise<string[]> } | null = null;
 
 /** `*` allows every alias in ~/.ssh/config; otherwise a comma-separated list; empty turns SSH off. */

@@ -1,21 +1,22 @@
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { CHUNK_BYTES, UPLOAD_ALIGN_BYTES, type ByteRange, type PendingUpload } from "../shared/rpc";
-import { safeFileName, uniquePath } from "./files";
+import { safeFileName, publishUnique } from "./files";
 import { locate, refOf, type Located, type MediaHost } from "./hosts";
+import { keyedQueue } from "./queue";
 import { statLocated } from "./probe";
 
 // Uploads and downloads move in pieces over plugin RPC, so they work through the daemon's direct
 // connection, a reverse proxy or a tunnel without any extra port.
 //
 // An upload writes each piece at its offset in a hidden part file next to the target (pieces may
-// arrive out of order) and renames it into place once every byte is there, so an interrupted
-// upload never leaves a half file under the real name. Uploads resume: the same file (name, size,
-// modification time) to the same folder maps to the same upload ID and part file, and the ranges
+// arrive out of order) and publishes it under an exclusive name once every byte is there, so an interrupted
+// upload never leaves a half file under the real name. Each new selection has a random upload ID;
+// resuming uses that explicit ID rather than inferring identity from file metadata. The ranges
 // already written are kept in a small record on the daemon host. After a dropped connection, a page
-// reload, a plugin reload or a daemon restart, `begin` returns those ranges and the app sends only
+// reload, a plugin reload or a daemon restart, `begin` with the task ID returns its ranges and sends
 // the rest. Records and part files nobody resumes are removed after a few days.
 //
 // On an SSH host each piece is one `dd` over the shared connection; the record stays on the daemon.
@@ -36,9 +37,12 @@ interface UploadRecord {
   name: string;
   size: number;
   lastModified: number | null;
+  fingerprint?: string;
   /** Part file path on the folder's host. */
   partPath: string;
   received: ByteRange[];
+  completedPath?: string;
+  publishingPath?: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -89,21 +93,15 @@ function clampRanges(ranges: readonly ByteRange[], size: number): ByteRange[] {
   return ranges.filter(([start]) => start < size).map(([start, end]) => [start, Math.min(end, size)] as ByteRange);
 }
 
-function uploadIdFor(dir: string, name: string, size: number, lastModified: number | null): string {
-  return createHash("sha1")
-    .update([dir, name, size, lastModified ?? ""].join("\u0000"))
-    .digest("hex")
-    .slice(0, 24);
-}
-
 function partName(name: string, uploadId: string): string {
   // Keep the hidden part file name within the 255-byte limit of most file systems.
   let stem = name;
   while (Buffer.byteLength(stem) > 200) stem = stem.slice(0, -1);
-  return `.${stem}.${uploadId.slice(0, 10)}.part`;
+  return `.${stem}.${uploadId}.part`;
 }
 
 function recordFile(uploadId: string): string {
+  if (!/^(?:[a-f0-9]{24}|[a-f0-9-]{36})$/.test(uploadId)) throw new Error("Invalid upload ID");
   return path.join(STATE_DIR, `${uploadId}.json`);
 }
 
@@ -120,8 +118,10 @@ async function writeRecord(record: UploadRecord): Promise<void> {
   await fs.mkdir(STATE_DIR, { recursive: true });
   const file = recordFile(record.uploadId);
   const temp = `${file}.${randomUUID().slice(0, 8)}.tmp`;
-  await fs.writeFile(temp, JSON.stringify(record));
-  await fs.rename(temp, file);
+  try {
+    await fs.writeFile(temp, JSON.stringify(record));
+    await fs.rename(temp, file);
+  } finally { await fs.unlink(temp).catch(() => undefined); }
 }
 
 async function deleteRecord(uploadId: string): Promise<void> {
@@ -138,6 +138,13 @@ async function allRecords(): Promise<UploadRecord[]> {
 
 export function createTransfers() {
   const uploads = new Map<string, ActiveUpload>();
+  const mutate = keyedQueue();
+  const persist = keyedQueue();
+  const capacity = keyedQueue();
+  let stopped = false;
+  const finished = new Map<string, string>();
+  const MAX_UPLOAD_BYTES = 16 * 1024 ** 3;
+  const MAX_UPLOADS = 64;
   const downloads = new Map<string, Download>();
   /** One load at a time per upload, so parallel pieces after a restart share it. */
   const loading = new Map<string, Promise<ActiveUpload>>();
@@ -146,14 +153,14 @@ export function createTransfers() {
     if (upload.flushTimer) return;
     upload.flushTimer = setTimeout(() => {
       upload.flushTimer = null;
-      void writeRecord(upload.record).catch((error) => console.error("media-studio: could not save upload progress", error));
+      void persist(upload.record.uploadId, () => writeRecord(upload.record)).catch((error) => console.error("media-studio: could not save upload progress", error));
     }, FLUSH_MS);
   }
 
   async function flushNow(upload: ActiveUpload): Promise<void> {
     if (upload.flushTimer) clearTimeout(upload.flushTimer);
     upload.flushTimer = null;
-    await writeRecord(upload.record);
+    await persist(upload.record.uploadId, () => writeRecord(upload.record));
   }
 
   /** The upload in memory, or loaded from its record after a plugin or daemon restart. */
@@ -177,18 +184,23 @@ export function createTransfers() {
 
   async function begin(
     dir: Located,
-    input: { name: string; size: number; lastModified?: number | null },
+    input: { name: string; size: number; lastModified?: number | null; uploadId?: string | null; fingerprint: string },
   ): Promise<{ uploadId: string; received: ByteRange[]; receivedBytes: number; resumed: boolean }> {
     const name = safeFileName(input.name);
     const lastModified = input.lastModified ?? null;
-    const uploadId = uploadIdFor(dir.ref, name, input.size, lastModified);
+    if (input.uploadId && !/^(?:[a-f0-9]{24}|[a-f0-9-]{36})$/.test(input.uploadId)) throw new Error("Invalid upload ID");
+    const uploadId = input.uploadId || randomUUID();
     let upload = uploads.get(uploadId) ?? null;
+    if (upload && (upload.record.dir !== dir.ref || upload.record.name !== name || upload.record.size !== input.size || upload.record.lastModified !== lastModified || upload.record.fingerprint !== input.fingerprint)) throw new Error("Upload file does not match");
     let resumed = false;
     if (upload) {
       resumed = coveredBytes(upload.record.received) > 0;
     } else {
       const record = await readRecord(uploadId);
-      if (record && record.dir === dir.ref && record.size === input.size) {
+      if (input.uploadId && !record) throw new Error("This upload expired. Start it again.");
+      if (record && (record.dir !== dir.ref || record.name !== name || record.size !== input.size || record.lastModified !== lastModified || record.fingerprint !== input.fingerprint)) throw new Error("Upload file does not match");
+      if (record?.completedPath) return { uploadId, received: record.received, receivedBytes: record.size, resumed: true };
+      if (record) {
         // The part file must still be there; only ranges inside it count.
         const part = await dir.host.stat(record.partPath).catch(() => null);
         if (part?.isFile) {
@@ -198,17 +210,20 @@ export function createTransfers() {
         }
       }
       if (!upload) {
+        const records = (await allRecords()).filter((entry) => !entry.completedPath);
+        if (records.length >= MAX_UPLOADS || records.reduce((sum, entry) => sum + entry.size, 0) + input.size > MAX_UPLOAD_BYTES) throw new Error("Unfinished upload quota reached");
         await dir.host.mkdirp(dir.path);
         const partPath = path.posix.join(dir.path, partName(name, uploadId));
-        await dir.host.createEmpty(partPath);
         const now = Date.now();
         upload = {
-          record: { version: 1, uploadId, dir: dir.ref, name, size: input.size, lastModified, partPath, received: [], createdAt: now, updatedAt: now },
+          record: { version: 1, uploadId, dir: dir.ref, name, size: input.size, lastModified, fingerprint: input.fingerprint, partPath, received: [], createdAt: now, updatedAt: now },
           host: dir.host,
           dirPath: dir.path,
           lastUsed: now,
           flushTimer: null,
         };
+        await flushNow(upload);
+        await dir.host.createEmpty(partPath);
       }
       uploads.set(uploadId, upload);
       await flushNow(upload);
@@ -234,6 +249,8 @@ export function createTransfers() {
   }
 
   async function finish(input: { uploadId: string }): Promise<{ path: string }> {
+    const saved = await readRecord(input.uploadId);
+    if (saved?.completedPath) return { path: saved.completedPath };
     const upload = await activate(input.uploadId);
     const { record } = upload;
     if (!isComplete(record.received, record.size)) {
@@ -243,10 +260,29 @@ export function createTransfers() {
     if (!written || written.size !== record.size) throw new Error("The uploaded file has the wrong size");
     if (upload.flushTimer) clearTimeout(upload.flushTimer);
     upload.flushTimer = null;
-    const target = await uniquePath(upload.host, upload.dirPath, record.name);
-    await upload.host.rename(record.partPath, target);
+    await flushNow(upload);
+    const commit = async (target: string) => {
+      record.completedPath = refOf(upload.host, target);
+      await persist(input.uploadId, () => writeRecord(record));
+    };
+    let target: string;
+    if (record.publishingPath && await upload.host.sameFile(record.partPath, record.publishingPath)) {
+      target = record.publishingPath;
+      await commit(target);
+      await upload.host.remove(record.partPath);
+    } else {
+      target = await publishUnique(upload.host, record.partPath, upload.dirPath, record.name, {
+        before: async (candidate) => { record.publishingPath = candidate; await persist(input.uploadId, () => writeRecord(record)); },
+        commit,
+      });
+    }
+    finished.set(input.uploadId, refOf(upload.host, target));
+    if (finished.size > 128) finished.delete(finished.keys().next().value!);
+    record.completedPath = refOf(upload.host, target);
+    await persist(input.uploadId, () => writeRecord(record));
     uploads.delete(input.uploadId);
-    await deleteRecord(input.uploadId);
+    const completed = (await allRecords()).filter((entry) => entry.completedPath).sort((a,b) => b.updatedAt - a.updatedAt);
+    for (const old of completed.slice(128)) await deleteRecord(old.uploadId);
     return { path: refOf(upload.host, target) };
   }
 
@@ -254,8 +290,10 @@ export function createTransfers() {
     const upload = uploads.get(uploadId) ?? (await activate(uploadId).catch(() => null));
     if (upload?.flushTimer) clearTimeout(upload.flushTimer);
     uploads.delete(uploadId);
-    if (upload) await upload.host.remove(upload.record.partPath);
-    await deleteRecord(uploadId);
+    if (upload) {
+      await persist(uploadId, () => upload.host.remove(upload.record.partPath));
+      await persist(uploadId, () => deleteRecord(uploadId));
+    }
   }
 
   function isUnder(dir: string, root: string): boolean {
@@ -269,6 +307,7 @@ export function createTransfers() {
     // Uploads in memory are newer than their records between flushes.
     for (const upload of uploads.values()) records.set(upload.record.uploadId, upload.record);
     return [...records.values()]
+      .filter((record) => !record.completedPath)
       .filter((record) => !root || isUnder(record.dir, root))
       .filter((record) => Date.now() - record.updatedAt < KEEP_MS)
       .sort((a, b) => b.updatedAt - a.updatedAt)
@@ -286,16 +325,18 @@ export function createTransfers() {
   /** Removes uploads nobody resumed within KEEP_MS, part files included. */
   async function sweepStale(): Promise<void> {
     const now = Date.now();
-    for (const record of await allRecords()) {
-      if (uploads.has(record.uploadId) || now - record.updatedAt < KEEP_MS) continue;
-      try {
-        const dir = await locate(record.dir);
-        await dir.host.remove(record.partPath);
-        await deleteRecord(record.uploadId);
-      } catch {
-        // The host is unreachable or no longer allowed; give up on the part file eventually.
-        if (now - record.updatedAt > KEEP_MS * 2) await deleteRecord(record.uploadId);
-      }
+    for (const saved of await allRecords()) {
+      await mutate(saved.uploadId, async () => {
+        const record = await readRecord(saved.uploadId);
+        if (!record || uploads.has(record.uploadId) || now - record.updatedAt < KEEP_MS) return;
+        try {
+          const dir = await locate(record.dir);
+          await dir.host.remove(record.partPath);
+          await deleteRecord(record.uploadId);
+        } catch {
+          // Retain the record until its remote part file has actually been removed.
+        }
+      });
     }
   }
 
@@ -303,8 +344,12 @@ export function createTransfers() {
     const now = Date.now();
     for (const [id, upload] of uploads) {
       if (now - upload.lastUsed <= IDLE_MS) continue;
-      uploads.delete(id);
-      void flushNow(upload).catch(() => undefined);
+      void mutate(id, async () => {
+        const current = uploads.get(id);
+        if (!current || Date.now() - current.lastUsed <= IDLE_MS) return;
+        await flushNow(current);
+        uploads.delete(id);
+      }).catch(() => undefined);
     }
     for (const [id, download] of downloads) if (now - download.lastUsed > IDLE_MS) downloads.delete(id);
   }, 60_000);
@@ -316,6 +361,7 @@ export function createTransfers() {
 
   async function openDownload(location: Located): Promise<{ transferId: string; path: string; name: string; size: number }> {
     const stats = await statLocated(location);
+    if (downloads.size >= 32) throw new Error("Too many downloads are open");
     const transferId = randomUUID();
     downloads.set(transferId, { location, size: stats.size, lastUsed: Date.now() });
     return { transferId, path: location.ref, name: path.basename(location.path), size: stats.size };
@@ -332,20 +378,29 @@ export function createTransfers() {
   }
 
   async function dispose(): Promise<void> {
+    stopped = true;
     clearInterval(memorySweeper);
     clearInterval(staleSweeper);
     clearTimeout(firstSweep);
+    await mutate.drain();
     // Unfinished uploads stay resumable: save their progress, keep their part files.
     await Promise.all([...uploads.values()].map((upload) => flushNow(upload).catch(() => undefined)));
     uploads.clear();
     downloads.clear();
   }
 
+  function change<T>(id: string, task: () => Promise<T>): Promise<T> {
+    if (stopped) return Promise.reject(new Error("Transfers are closed"));
+    return mutate(id, task);
+  }
   return {
-    begin,
-    write,
-    finish,
-    abort,
+    begin: (dir: Located, input: Parameters<typeof begin>[1]) => change(input.uploadId ?? "new", () => capacity("capacity", () => begin(dir, input))),
+    write: (input: Parameters<typeof write>[0]) => change(input.uploadId, () => write(input)),
+    finish: (input: Parameters<typeof finish>[0]) => change(input.uploadId, () => {
+      const path = finished.get(input.uploadId);
+      return path ? Promise.resolve({ path }) : finish(input);
+    }),
+    abort: (id: string) => change(id, () => abort(id)),
     pending,
     sweepStale,
     openDownload,

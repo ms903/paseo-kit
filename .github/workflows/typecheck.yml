@@ -28,3 +28,19 @@ jobs:
         run: |
           hits=$(grep -rnE "document\.|window\.|localStorage|navigator\.|className=|onClick=" client/ --include='*.ts' --include='*.tsx' | grep -v '^client/web\.ts:' || true)
           if [ -n "$hits" ]; then echo "$hits"; exit 1; fi
+
+  regression:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: [22, 24]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+          cache-dependency-path: '**/package-lock.json'
+      - run: npm ci
+      - run: npm run install:all
+      - run: npm test

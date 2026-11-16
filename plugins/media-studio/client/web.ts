@@ -3,6 +3,7 @@
 // this file declares just the parts of the browser it uses.
 import { createElement, type ReactElement } from "react";
 import { Platform } from "react-native";
+import { sha256 } from "../shared/sha256";
 import { snapToFrame } from "../shared/media";
 
 export const isWeb = Platform.OS === "web";
@@ -627,9 +628,9 @@ export function attachDropTarget(
 }
 
 /** Files up to this size download through the browser's own flow, straight to Downloads. */
-const MEMORY_DOWNLOAD_BYTES = 256 * 1024 * 1024;
+const MEMORY_DOWNLOAD_BYTES = 32 * 1024 * 1024;
 /** Largest file assembled in memory when the browser cannot write to disk as it goes. */
-const MAX_MEMORY_DOWNLOAD_BYTES = 2 * 1024 * 1024 * 1024;
+const MAX_MEMORY_DOWNLOAD_BYTES = 64 * 1024 * 1024;
 
 export interface SaveSink {
   write(bytes: Uint8Array): Promise<void>;
@@ -667,7 +668,7 @@ export async function openSaveSink(name: string, size: number): Promise<SaveSink
     }
   }
   if (size > MAX_MEMORY_DOWNLOAD_BYTES) {
-    throw new Error("This browser cannot save files larger than 2 GB. Use the desktop app or Chrome.");
+    throw new Error("Streaming file saving is unavailable for this download.");
   }
   const parts: Uint8Array[] = [];
   return {
@@ -773,4 +774,17 @@ export function onPageHide(callback: () => void): () => void {
     window.removeEventListener("pagehide", listener);
     document.removeEventListener("visibilitychange", listener);
   };
+}
+
+/** Full-content fingerprint with bounded memory: SHA-256 over SHA-256 digests of 4 MiB pieces. */
+export async function fileFingerprint(file: WebFile, stopped?: () => boolean): Promise<string> {
+  const piece = 4 * 1024 * 1024;
+  const digests = new Uint8Array(Math.max(1, Math.ceil(file.size / piece)) * 32);
+  for (let offset = 0; offset < file.size; offset += piece) {
+    if (stopped?.()) throw new Error("Canceled");
+    const hash = sha256(new Uint8Array(await file.slice(offset, Math.min(file.size, offset + piece)).arrayBuffer()));
+    digests.set(hash, Math.floor(offset / piece) * 32);
+  }
+  const result = sha256(digests);
+  return `sha256-tree-v1:${[...result].map((byte) => byte.toString(16).padStart(2, "0")).join("")}`;
 }

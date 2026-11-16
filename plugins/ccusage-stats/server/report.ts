@@ -1,3 +1,4 @@
+import { antigravityReport, mergeAntigravity } from "./antigravity";
 import type { RpcOutput } from "@getpaseo/plugin";
 import {
   EMPTY_USAGE,
@@ -175,6 +176,7 @@ export function createReportCache(): ReportCache {
   const lifetime = new AbortController();
   let snapshot: Snapshot | null = null;
   let fetchedAt = 0;
+  let attemptedAt = 0;
   // Bumped by every finished turn; a run that started before the last bump is already stale.
   let invalidations = 0;
   let freshAs = 0;
@@ -185,17 +187,17 @@ export function createReportCache(): ReportCache {
 
   const refresh = (): Promise<Snapshot> => {
     inflight ??= (async () => {
-      const startedAt = Date.now();
+      attemptedAt = Date.now();
       const seen = invalidations;
       try {
-        const today = localToday(timezone);
-        const raw = await runCcusage(timezone, lifetime.signal);
+        const [base, antigravity] = await Promise.all([runCcusage(timezone, lifetime.signal), antigravityReport(timezone, lifetime.signal)]);
+        const raw = mergeAntigravity(base, antigravity);
         const next = {
-          report: buildReport(raw, timezone, today),
+          report: buildReport(raw, timezone, localToday(timezone)),
           sessions: raw.session.map(sessionOf),
         };
         snapshot = next;
-        fetchedAt = startedAt;
+        fetchedAt = Date.now();
         freshAs = seen;
         refreshError = null;
         return next;
@@ -213,7 +215,7 @@ export function createReportCache(): ReportCache {
   const current = async (): Promise<Snapshot> => {
     lastReadAt = Date.now();
     if (!snapshot) return refresh();
-    if (freshAs !== invalidations || Date.now() - fetchedAt > FRESH_MS) {
+    if ((freshAs !== invalidations || Date.now() - fetchedAt > FRESH_MS) && Date.now() - attemptedAt >= FRESH_MS) {
       refresh().catch(() => {
         // Logged in refresh; the stale snapshot below carries the error.
       });
@@ -234,7 +236,7 @@ export function createReportCache(): ReportCache {
       if (debounce) clearTimeout(debounce);
       debounce = setTimeout(() => {
         debounce = null;
-        if (Date.now() - lastReadAt < ACTIVE_READER_MS) refresh().catch(() => {});
+        if (Date.now() - lastReadAt < ACTIVE_READER_MS && Date.now() - attemptedAt >= FRESH_MS) refresh().catch(() => {});
       }, INVALIDATE_DEBOUNCE_MS);
     },
     stop() {

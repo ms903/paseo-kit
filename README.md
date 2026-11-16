@@ -1,9 +1,11 @@
 # paseo-kit
 
-[![typecheck](https://github.com/a31521424/paseo-kit/actions/workflows/typecheck.yml/badge.svg)](https://github.com/a31521424/paseo-kit/actions/workflows/typecheck.yml)
+[![typecheck](https://github.com/ms903/paseo-kit/actions/workflows/typecheck.yml/badge.svg)](https://github.com/ms903/paseo-kit/actions/workflows/typecheck.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
 English | [简体中文](README.zh-CN.md)
+
+Fork of [a31521424/paseo-kit](https://github.com/a31521424/paseo-kit).
 
 A collection of [Paseo](https://paseo.sh) plugins. Each plugin lives in `plugins/<id>/` and is a
 complete, self-contained Paseo plugin project.
@@ -33,8 +35,9 @@ complete, self-contained Paseo plugin project.
 - Full **Token usage** screen (also in the Command Center): 30 days / 12 weeks / 12 months of history,
   cost per million tokens, cache hit rate, per-agent and per-model breakdown, recent sessions.
 - A composer pill on each agent with the token total of its current provider session.
+- Antigravity app, IDE and CLI usage is read from local conversation databases, including live WAL updates. Costs use Google and Anthropic public prices for input, output and cache tokens.
 - Counts every agent ccusage supports (Claude Code, Codex, Gemini CLI, OpenCode, Amp, ...).
-  Costs are offline estimates at API list prices. Nothing is sent off the host.
+  Costs use public API prices.
 
 ### file-download
 
@@ -99,10 +102,10 @@ paseo-kit does not vendor any third-party code. Dependencies are declared per pl
 | Dependency | Version | Notes |
 | --- | --- | --- |
 | [Paseo](https://github.com/getpaseo/paseo) daemon and app | >= 0.11.1 | Declared as `requirements.paseo` in each `paseo-plugin.json`. |
-| Node.js and npm | Node 22+ recommended | On the daemon host, for installing dependencies and the `ccusage-stats` build step. |
+| Node.js and npm | Node 22.13+ | On the daemon host, for installing dependencies and the `ccusage-stats` build step. |
 | `paseo` CLI | same as the daemon | On the daemon's PATH, for `tab-recovery` to restore agents. Present with a standard install. |
 | Linux `/proc` | - | `host-monitor` network speed, available memory and the disk list. Other systems show CPU, RAM and the root disk only. |
-| ffmpeg (ffprobe optional) | 6 or later recommended | On the daemon host for `media-studio`, with libx264; also on any SSH host whose files it previews. |
+| ffmpeg (ffprobe optional), Python 3 on SSH hosts | 6 or later recommended | On the daemon host for `media-studio`, with libx264; also on any SSH host whose files it previews. |
 | `ssh` client | - | Only for `media-studio` files on SSH hosts; keys must work without a prompt. |
 
 **Runtime npm dependencies** (installed with the plugin)
@@ -140,10 +143,10 @@ Copy this prompt into a Paseo agent running on the target machine. It installs o
 plugins from GitHub. To install only some, remove the other IDs from step 3.
 
 ```text
-Install the paseo-kit Paseo plugins from https://github.com/a31521424/paseo-kit on this machine's Paseo daemon. Never restart the Paseo daemon; it would kill running agents.
+Install the paseo-kit Paseo plugins from https://github.com/ms903/paseo-kit on this machine's Paseo daemon. Never restart the Paseo daemon; it would kill running agents.
 1. Run `paseo --version` and require 0.11.1 or later. Run `npm --version`; npm must be on the daemon's PATH because ccusage-stats runs `npm ci --omit=dev` when it installs.
 2. Get `home` from `paseo daemon status --json` and read `pluginsEnabled` in `<home>/config.json` (missing means false). If it is not true, stop and ask me before enabling it, and warn me that plugins are trusted, unsandboxed code with access to this machine. If I agree, set only that field to true, keep the rest of the file, and run `paseo reload --json`.
-3. Run `paseo plugin ls`. For each ID in `host-monitor`, `ccusage-stats`, `file-download`, `tab-recovery` and `media-studio`: if it is not installed, run `paseo plugin install github:a31521424/paseo-kit:plugins/<id>`; if its SOURCE is already this GitHub repository, run `paseo plugin update <id> --yes`; if it is installed from any other source, ask me before removing and reinstalling it.
+3. Run `paseo plugin ls`. For each ID in `host-monitor`, `ccusage-stats`, `file-download`, `tab-recovery` and `media-studio`: if it is not installed, run `paseo plugin install github:ms903/paseo-kit:plugins/<id>`; if its SOURCE is already this GitHub repository, run `paseo plugin update <id> --yes`; if it is installed from any other source, ask me before removing and reinstalling it.
 4. Run `paseo plugin ls` and require every plugin to be `running` with no error. If one fails, show me its error and `paseo plugin logs <id>`.
 5. Report each plugin's SOURCE and REVISION.
 ```
@@ -151,11 +154,11 @@ Install the paseo-kit Paseo plugins from https://github.com/a31521424/paseo-kit 
 ### From GitHub
 
 ```bash
-paseo plugin install github:a31521424/paseo-kit:plugins/host-monitor
-paseo plugin install github:a31521424/paseo-kit:plugins/ccusage-stats
-paseo plugin install github:a31521424/paseo-kit:plugins/file-download
-paseo plugin install github:a31521424/paseo-kit:plugins/tab-recovery
-paseo plugin install github:a31521424/paseo-kit:plugins/media-studio
+paseo plugin install github:ms903/paseo-kit:plugins/host-monitor
+paseo plugin install github:ms903/paseo-kit:plugins/ccusage-stats
+paseo plugin install github:ms903/paseo-kit:plugins/file-download
+paseo plugin install github:ms903/paseo-kit:plugins/tab-recovery
+paseo plugin install github:ms903/paseo-kit:plugins/media-studio
 ```
 
 `ccusage-stats` declares `build: [["npm", "ci", "--omit=dev"]]`, so Paseo installs the bundled
@@ -165,7 +168,7 @@ Update later with `paseo plugin update <id>`.
 ### From a local clone
 
 ```bash
-git clone https://github.com/a31521424/paseo-kit.git
+git clone https://github.com/ms903/paseo-kit.git
 cd paseo-kit
 npm run install:all
 
@@ -183,6 +186,7 @@ Paseo loads directory plugins from the source directory itself. If you move the 
 ## Development
 
 ```bash
+npm test                       # regression tests
 npm run typecheck              # all plugins; or `npm run typecheck` inside plugins/<id>
 paseo plugin reload <id>       # load source changes
 paseo plugin ls                # require status "running" with no error
@@ -248,3 +252,14 @@ and never log them from plugin code.
 Licensed under the [Apache License, Version 2.0](LICENSE), the same license as
 [Paseo](https://github.com/getpaseo/paseo). See [NOTICE](NOTICE). Third-party dependencies keep their
 own licenses, listed under [Dependencies](#dependencies).
+
+## Resource settings
+
+Media turn cards and composer scanning are opt-in. Configure SSH aliases explicitly in
+Media studio settings. Remote filesystem operations require Python 3, along with ffmpeg.
+
+Media storage limits: preview cache 1 GiB, review notes 64 MiB, saved frames 1 GiB across
+tracked files (512 MiB per folder), unfinished uploads 16 GiB and 64 tasks. Storage usage and
+cache cleanup are available in Media studio settings. Unfinished uploads expire after three
+days; remote deletion failures retain their cleanup record. Completed uploads remain user files.
+Browsers without streaming file saving use a 64 MiB memory limit.

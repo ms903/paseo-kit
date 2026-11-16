@@ -18,12 +18,19 @@ interface KeyEvent {
   shiftKey: boolean;
   altKey: boolean;
   repeat: boolean;
+  target?: { tagName?: string; isContentEditable?: boolean; closest?(selector: string): unknown };
   defaultPrevented: boolean;
   preventDefault(): void;
 }
 
 declare const document: { createElement(tag: string): DomElement; body: DomElement };
+interface SaveWritable {
+  write(bytes: Uint8Array): Promise<void>;
+  close(): Promise<void>;
+  abort(): Promise<void>;
+}
 declare const window: {
+  showSaveFilePicker?(options: { suggestedName: string }): Promise<{ createWritable(): Promise<SaveWritable> }>;
   addEventListener(type: "keydown", listener: (event: KeyEvent) => void): void;
   removeEventListener(type: "keydown", listener: (event: KeyEvent) => void): void;
 };
@@ -72,6 +79,8 @@ export function listenForSaveShortcut(onSave: (event: KeyEvent) => void): () => 
   if (!isWeb) return () => {};
   const listener = (event: KeyEvent) => {
     if (event.defaultPrevented || event.repeat || event.shiftKey || event.altKey) return;
+    const target = event.target;
+    if (target?.isContentEditable || /^(input|textarea|select)$/i.test(target?.tagName ?? "") || target?.closest?.('[contenteditable="true"], .monaco-editor, .cm-editor')) return;
     // The physical S key, so the shortcut also works on layouts where it types another letter.
     // Autofill dispatches keydown events without a key, hence the fallbacks.
     if (event.code !== "KeyS" && (event.key ?? "").toLowerCase() !== "s") return;
@@ -132,4 +141,26 @@ export function readFocusedTab(): FocusedTab | null {
   } catch {
     return null;
   }
+}
+
+export interface SaveSink extends SaveWritable { validateSize(size: number): void }
+
+/** Request the picker before RPC yields the user gesture; otherwise use a bounded Blob sink. */
+export async function openSaveSink(name: string): Promise<SaveSink> {
+  if (!isWeb) throw new Error("Downloads require a browser or desktop app");
+  if (window.showSaveFilePicker) {
+    const handle = await window.showSaveFilePicker({ suggestedName: name });
+    const writable = await handle.createWritable();
+    return { write: (bytes) => writable.write(bytes), close: () => writable.close(), abort: () => writable.abort(), validateSize() {} };
+  }
+  const limit = 64 * 1024 * 1024;
+  let received = 0;
+  const parts: Uint8Array[] = [];
+  const validateSize = (size: number) => { if (size > limit) throw new Error("Streaming file saving is unavailable for this download."); };
+  return {
+    validateSize,
+    async write(bytes) { validateSize(received + bytes.length); received += bytes.length; parts.push(bytes); },
+    async close() { saveFile(parts, name); parts.length = 0; },
+    async abort() { parts.length = 0; },
+  };
 }

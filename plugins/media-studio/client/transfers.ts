@@ -13,7 +13,7 @@ import {
   type PendingUpload,
 } from "../shared/rpc";
 import { addTransfer, getPluginClient, notifyUploaded, updateTransfer } from "./state";
-import { SaveCanceledError, base64ToBytes, bytesToBase64, openSaveSink, type WebFile } from "./web";
+import { SaveCanceledError, fileFingerprint, base64ToBytes, bytesToBase64, openSaveSink, type WebFile } from "./web";
 
 /** Pieces in flight per upload; enough to fill a link with a 100 ms round trip. */
 const UPLOAD_PARALLEL = 4;
@@ -33,7 +33,7 @@ const MAX_ATTEMPTS = 12;
 const MAX_BACKOFF_MS = 30_000;
 
 /** Errors that another attempt cannot fix. */
-const FATAL = /Invalid file name|Not an absolute|past the end|must start at multiples|too large|No space left|ENOSPC|Permission denied|EACCES|EROFS|not an allowed SSH host/i;
+const FATAL = /Upload file does not match|quota reached|Invalid file name|Not an absolute|past the end|must start at multiples|too large|No space left|ENOSPC|Permission denied|EACCES|EROFS|not an allowed SSH host/i;
 
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -50,6 +50,7 @@ interface UploadJob {
   file: WebFile;
   dir: string;
   uploadId: string | null;
+  fingerprint?: string;
   /** What the host already had on the first attempt, so the row can say the upload resumed. */
   resumedFrom: number | null;
   /**
@@ -89,7 +90,9 @@ function covers(ranges: readonly ByteRange[], start: number, end: number): boole
 async function uploadPass(job: UploadJob, onProgress: () => void): Promise<string> {
   const { rpc } = getPluginClient();
   const { file } = job;
-  const begun = await rpc(uploadBeginRpc, { dir: job.dir, name: file.name, size: file.size, lastModified: file.lastModified ?? null });
+  job.fingerprint ??= await fileFingerprint(file, () => job.stop !== null);
+  if (job.stop) throw new Stopped(job.stop);
+  const begun = await rpc(uploadBeginRpc, { dir: job.dir, name: file.name, size: file.size, lastModified: file.lastModified ?? null, uploadId: job.uploadId, fingerprint: job.fingerprint });
   job.uploadId = begun.uploadId;
   if (job.resumedFrom === null) job.resumedFrom = begun.receivedBytes;
   updateTransfer(job.transferId, { uploadId: begun.uploadId, done: begun.receivedBytes, resumedFrom: job.resumedFrom });
@@ -224,6 +227,7 @@ interface HandedOver {
   file: WebFile;
   dir: string;
   paused: boolean;
+  uploadId: string | null;
   resumedFrom: number | null;
 }
 type Handover = Record<string, HandedOver[]>;
@@ -248,7 +252,7 @@ export function handOverUploads(): void {
     const store = handoverStore();
     store[serverId] = [
       ...(store[serverId] ?? []),
-      ...[...jobs].map((job) => ({ file: job.file, dir: job.dir, paused: job.paused, resumedFrom: job.resumedFrom })),
+      ...[...jobs].map((job) => ({ file: job.file, dir: job.dir, paused: job.paused, uploadId: job.uploadId, resumedFrom: job.resumedFrom })),
     ];
   }
   for (const job of jobs) {
@@ -273,6 +277,7 @@ export async function adoptUploads(): Promise<void> {
   delete store[serverId];
   for (const entry of entries) {
     const job = createJob(entry.file, entry.dir, entry.resumedFrom);
+    job.uploadId = entry.uploadId;
     if (entry.paused) {
       job.paused = true;
       updateTransfer(job.transferId, { status: "paused", resumedFrom: entry.resumedFrom ?? 0, ...controls(job, "paused") });
@@ -307,7 +312,9 @@ export function matchesPending(file: WebFile, pending: PendingUpload): boolean {
 /** Continues an unfinished upload with the file the user picked again; sends only what is missing. */
 export function resumePending(pending: PendingUpload, file: WebFile): Promise<string[]> {
   if (!matchesPending(file, pending)) throw new Error(`Pick the same file: ${pending.name}`);
-  return uploadFiles([file], pending.dir);
+  const job = createJob(file, pending.dir);
+  job.uploadId = pending.uploadId;
+  return start(job).then((path) => path ? [path] : []);
 }
 
 /** Discards an unfinished upload and the bytes already on the host. */

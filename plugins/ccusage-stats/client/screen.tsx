@@ -300,10 +300,7 @@ function Body({
         )}
       </Card>
 
-      <Text style={{ fontSize: FONT.caption, color: theme.colors.foregroundMuted }}>
-        Read by ccusage from local agent logs on this host. Costs are estimates from ccusage's
-        built-in pricing table, not your bill.
-      </Text>
+
     </View>
   );
 }

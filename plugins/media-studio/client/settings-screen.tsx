@@ -3,7 +3,7 @@ import { SettingsAction, SettingsCard, SettingsInput, SettingsRow, SettingsSecti
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { Text, View } from "react-native";
-import { hostCheckRpc, statusRpc } from "../shared/rpc";
+import { hostCheckRpc, statusRpc, storageRpc, storageCleanRpc } from "../shared/rpc";
 import { settingsDefinition, type MediaStudioSettings } from "../shared/settings";
 import { messages } from "./i18n";
 
@@ -14,6 +14,11 @@ export function SettingsScreen({ theme }: PluginSurfaceProps) {
   const settings = useSettings(settingsDefinition);
   const status = useRpc(statusRpc);
   const check = useRpc(hostCheckRpc);
+  const readStorage = useRpc(storageRpc);
+  const cleanStorage = useRpc(storageCleanRpc);
+  const storage = useQuery({ queryKey: ["media-studio", "storage"], queryFn: () => readStorage({}) });
+  const [cleaning, setCleaning] = useState(false);
+  const [storageError, setStorageError] = useState<string | null>(null);
   const tools = useQuery({ queryKey: ["media-studio", "status"], queryFn: () => status({}) });
   const [drafts, setDrafts] = useState<Partial<Record<TextKey, string>>>({});
   const [checks, setChecks] = useState<Record<string, string>>({});
@@ -43,6 +48,18 @@ export function SettingsScreen({ theme }: PluginSurfaceProps) {
 
   return (
     <View style={{ gap: 24 }}>
+      <SettingsSection title={t("settings.storageTitle")}>
+        <SettingsCard>
+          <SettingsRow label={t("settings.cache")} hint={`${((storage.data?.cacheBytes ?? 0) / 1024 ** 2).toFixed(1)} MiB / 1024 MiB`} />
+          <SettingsRow label={t("settings.notes")} hint={`${((storage.data?.noteBytes ?? 0) / 1024 ** 2).toFixed(1)} MiB / 64 MiB`} />
+          <SettingsRow label={t("settings.frames")} hint={`${((storage.data?.frameBytes ?? 0) / 1024 ** 2).toFixed(1)} MiB / 1024 MiB`} />
+          <SettingsRow label={t("settings.uploads")} hint={`${storage.data?.unfinishedUploads ?? 0} · ${((storage.data?.uploadReservedBytes ?? 0) / 1024 ** 3).toFixed(2)} GiB / 16 GiB`} />
+          <SettingsAction label={storageError ?? storage.error?.message ?? t("settings.cleanup")} actionLabel={t("settings.clean")} disabled={cleaning} onPress={() => {
+            setCleaning(true); setStorageError(null);
+            void cleanStorage({}).then(() => storage.refetch()).catch((error) => setStorageError(String(error))).finally(() => setCleaning(false));
+          }} />
+        </SettingsCard>
+      </SettingsSection>
       <SettingsSection title={t("settings.toolsTitle")}>
         <SettingsCard>
           <SettingsRow label={t("settings.thisHost")} hint={tools.isPending ? t("viewer.loading") : describeTools(local)} />
@@ -93,7 +110,7 @@ export function SettingsScreen({ theme }: PluginSurfaceProps) {
         <SettingsCard>
           {textRow("uploadFolder", t("settings.uploadFolder"), t("settings.uploadFolderHint"), "uploads")}
           {textRow("framesFolder", t("settings.framesFolder"), t("settings.framesFolderHint"), ".media-studio/frames")}
-          {textRow("remoteHosts", t("settings.remoteHosts"), t("settings.remoteHostsHint", { aliases: (tools.data?.sshAliases ?? []).join(", ") || "-" }), "*")}
+          {textRow("remoteHosts", t("settings.remoteHosts"), t("settings.remoteHostsHint", { aliases: (tools.data?.sshAliases ?? []).join(", ") || "-" }), "gpu1, render")}
           {textRow("remoteFfmpeg", t("settings.remoteFfmpeg"), t("settings.remoteFfmpegHint"), "gpu1=/opt/ffmpeg/bin/ffmpeg")}
           {textRow("agentToolProviders", t("settings.providers"), t("settings.providersHint"), "claude, codex, opencode")}
           {textRow("ffmpegPath", t("settings.ffmpegPath"), t("settings.ffmpegPathHint"), "/opt/homebrew/bin/ffmpeg")}

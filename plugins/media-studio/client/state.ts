@@ -113,7 +113,7 @@ export function dismissTransfer(id: string): void {
 }
 
 export function clearFinishedTransfers(): void {
-  transfers.set(transfers.get().filter((transfer) => transfer.status === "running"));
+  transfers.set(transfers.get().filter((transfer) => transfer.status !== "done" && transfer.status !== "canceled"));
 }
 
 export function useTransfers(): readonly Transfer[] {

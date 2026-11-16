@@ -1,7 +1,7 @@
 {
   "id": "ccusage-stats",
   "name": "Token usage",
-  "description": "Token usage and estimated cost of your coding agents, powered by ccusage",
+  "description": "Token usage and cost of your coding agents, including Antigravity",
   "media": [
     "assets/screenshot.png",
     "assets/details.png"

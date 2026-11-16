@@ -9,8 +9,11 @@ const PAGE_SIZE = 200;
 const MAX_AGENTS = 50;
 const RESTORE_TIMEOUT_MS = 90_000;
 
-export async function listClosedAgents(paseo: Paseo, workspaceId: string): Promise<ClosedAgent[]> {
-  const agents: ClosedAgent[] = [];
+const listCaches = new WeakMap<Paseo, { at: number; pending: Promise<Map<string, ClosedAgent[]>> }>();
+const restoring = new Map<string, Promise<void>>();
+
+async function scanClosedAgents(paseo: Paseo): Promise<Map<string, ClosedAgent[]>> {
+  const grouped = new Map<string, ClosedAgent[]>();
   let cursor: string | undefined;
   do {
     const result = await paseo.agents.list({
@@ -19,7 +22,8 @@ export async function listClosedAgents(paseo: Paseo, workspaceId: string): Promi
     });
     for (const { agent } of result.entries) {
       // Closing a subagent's tab only hides it, so only top-level agents end up archived by a close.
-      if (agent.workspaceId !== workspaceId || !agent.archivedAt || agent.labels?.[PARENT_AGENT_LABEL]) continue;
+      if (!agent.workspaceId || !agent.archivedAt || agent.labels?.[PARENT_AGENT_LABEL]) continue;
+      const agents = grouped.get(agent.workspaceId) ?? [];
       agents.push({
         id: agent.id,
         title: agent.title,
@@ -28,11 +32,38 @@ export async function listClosedAgents(paseo: Paseo, workspaceId: string): Promi
         createdAt: agent.createdAt,
         archivedAt: agent.archivedAt,
       });
+      agents.sort((a, b) => Date.parse(b.archivedAt) - Date.parse(a.archivedAt));
+      if (agents.length > MAX_AGENTS) agents.length = MAX_AGENTS;
+      grouped.set(agent.workspaceId, agents);
     }
     cursor = result.pageInfo.hasMore ? (result.pageInfo.nextCursor ?? undefined) : undefined;
   } while (cursor);
-  agents.sort((a, b) => Date.parse(b.archivedAt) - Date.parse(a.archivedAt));
-  return agents.slice(0, MAX_AGENTS);
+  return grouped;
+}
+
+export async function listClosedAgents(paseo: Paseo, workspaceId: string): Promise<ClosedAgent[]> {
+  let entry = listCaches.get(paseo);
+  if (!entry || Date.now() - entry.at > 30_000) {
+    const next = { at: Date.now(), pending: scanClosedAgents(paseo) };
+    entry = next;
+    listCaches.set(paseo, next);
+    next.pending.then(() => { next.at = Date.now(); }, () => { if (listCaches.get(paseo) === next) listCaches.delete(paseo); });
+  }
+  return (await entry.pending).get(workspaceId) ?? [];
+}
+
+export function restoreClosedAgent(paseo: Paseo, workspaceId: string, agentId: string): Promise<void> {
+  const existing = restoring.get(agentId);
+  if (existing) return existing;
+  const pending = (async () => {
+    const result = await paseo.agents.ref(agentId).refresh();
+    const agent = result?.agent;
+    if (!agent || agent.workspaceId !== workspaceId || !agent.archivedAt || agent.labels?.[PARENT_AGENT_LABEL]) throw new Error("This agent is no longer closed in this workspace.");
+    await restoreAgent(agentId);
+    listCaches.delete(paseo);
+  })().finally(() => restoring.delete(agentId));
+  restoring.set(agentId, pending);
+  return pending;
 }
 
 /**

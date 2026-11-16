@@ -66,12 +66,13 @@ export function createLimiter(limit: number) {
   const queue: (() => void)[] = [];
   return async function limited<T>(task: () => Promise<T>): Promise<T> {
     if (active >= limit) await new Promise<void>((resolve) => queue.push(resolve));
-    active += 1;
+    else active += 1;
     try {
       return await task();
     } finally {
-      active -= 1;
-      queue.shift()?.();
+      const next = queue.shift();
+      if (next) next();
+      else active -= 1;
     }
   };
 }

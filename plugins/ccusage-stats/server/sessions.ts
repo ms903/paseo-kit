@@ -7,6 +7,7 @@ type PaseoApi = PluginHandlerContext["paseo"];
 
 // A provider session id rarely changes once an agent has one; a resume or refresh can replace it.
 const SESSION_ID_TTL_MS = 5 * 60_000;
+const MAX_SESSION_IDS = 1000;
 
 interface CachedSessionId {
   /** null: the agent has no provider session yet. */
@@ -29,13 +30,17 @@ export function createSessionMatcher(cache: ReportCache) {
 
   async function providerSessionId(paseo: PaseoApi, agentId: string): Promise<string | null> {
     const cached = sessionIds.get(agentId);
-    if (cached && cached.sessionId && Date.now() - cached.at < SESSION_ID_TTL_MS) {
+    if (cached && Date.now() - cached.at < (cached.sessionId ? SESSION_ID_TTL_MS : 10_000)) {
       return cached.sessionId;
     }
     const result = await paseo.agents.ref(agentId).refresh();
     // Read only the id: the persistence record also carries launch config with credentials.
     const persistence = result?.agent.persistence;
     const sessionId = persistence?.nativeHandle || persistence?.sessionId || null;
+    for (const [id, entry] of sessionIds) {
+      if (Date.now() - entry.at >= SESSION_ID_TTL_MS) sessionIds.delete(id);
+    }
+    if (sessionIds.size >= MAX_SESSION_IDS) sessionIds.delete(sessionIds.keys().next().value!);
     sessionIds.set(agentId, { sessionId, at: Date.now() });
     return sessionId;
   }

@@ -9,7 +9,7 @@ See [OVERVIEW.md](OVERVIEW.md) for what it does and its limits.
 ## Install
 
 ```bash
-paseo plugin install github:a31521424/paseo-kit:plugins/media-studio
+paseo plugin install github:ms903/paseo-kit:plugins/media-studio
 ```
 
 Or from a local clone of [paseo-kit](../../README.md):

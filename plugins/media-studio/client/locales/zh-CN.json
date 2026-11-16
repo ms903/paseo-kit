@@ -163,7 +163,14 @@
     "saveHint": "保存上面的文本项。",
     "save": "保存",
     "remoteFfmpeg": "SSH 主机上的 ffmpeg",
-    "remoteFfmpegHint": "仅在自动找不到时填写：别名=/ffmpeg/路径，逗号分隔。默认会先查 PATH、常见目录，以及 Python 包 imageio-ffmpeg 自带的 ffmpeg。"
+    "remoteFfmpegHint": "仅在自动找不到时填写：别名=/ffmpeg/路径，逗号分隔。默认会先查 PATH、常见目录，以及 Python 包 imageio-ffmpeg 自带的 ffmpeg。",
+    "storageTitle": "存储",
+    "cache": "预览缓存",
+    "notes": "审阅笔记",
+    "frames": "已保存帧",
+    "uploads": "未完成上传",
+    "cleanup": "预览缓存和过期上传",
+    "clean": "清理"
   },
   "pending": {
     "title": "未完成的上传",

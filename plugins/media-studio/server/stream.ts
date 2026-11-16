@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { STREAM_READ_BYTES, type Quality } from "../shared/rpc";
-import { lastErrorLine } from "./ffmpeg";
+import { heavy, lastErrorLine } from "./ffmpeg";
 import { ffmpegOn, type Child, type Located, type MediaHost } from "./hosts";
 import { probe, type ProbeDetails } from "./probe";
 
@@ -40,6 +40,7 @@ interface Session {
   waiters: (() => void)[];
   /** Whether a read has returned media yet. */
   started: boolean;
+  lastData: number;
 }
 
 export interface OpenRequest {
@@ -90,15 +91,21 @@ function targetHeight(info: ProbeDetails, quality: Quality): number {
 /** Keyframe times per file version, built once in the background by decoding only keyframes. */
 const keyframeIndexes = new Map<string, Promise<number[] | null>>();
 const INDEX_LIMIT = 64;
+const indexChildren = new Set<Child>();
+let indexEpoch = 0;
 
 function keyframeIndex(host: MediaHost, ffmpeg: string, info: ProbeDetails): Promise<number[] | null> {
   const key = `${info.path}\u0000${info.size}\u0000${info.modifiedAt}`;
   let entry = keyframeIndexes.get(key);
   if (!entry) {
-    entry = new Promise<number[] | null>((resolve) => {
+    const epoch = indexEpoch;
+    entry = heavy(() => new Promise<number[] | null>((resolve) => {
+      if (epoch !== indexEpoch) { resolve(null); return; }
       void host
         .spawn(ffmpeg, ["-hide_banner", "-nostdin", "-skip_frame", "nokey", "-i", info.location.path, "-map", "0:v:0", "-an", "-vf", "showinfo", "-f", "null", "-"])
         .then((child) => {
+          if (epoch !== indexEpoch) { child.kill("SIGKILL"); resolve(null); return; }
+          indexChildren.add(child);
           const times: number[] = [];
           let carry = "";
           const timer = setTimeout(() => child.kill("SIGKILL"), 120_000);
@@ -114,14 +121,15 @@ function keyframeIndex(host: MediaHost, ffmpeg: string, info: ProbeDetails): Pro
           });
           child.on("close", (code) => {
             clearTimeout(timer);
+            indexChildren.delete(child);
             // Only trust an index that starts at the file start; other timelines are left to ffmpeg.
             resolve(code === 0 && times.length > 0 && Math.abs(times[0]!) < 0.5 ? times.sort((a, b) => a - b) : null);
           });
-          child.on("error", () => resolve(null));
+          child.on("error", () => { clearTimeout(timer); indexChildren.delete(child); resolve(null); });
           return undefined;
         })
         .catch(() => resolve(null));
-    });
+    }));
     keyframeIndexes.set(key, entry);
     if (keyframeIndexes.size > INDEX_LIMIT) keyframeIndexes.delete(keyframeIndexes.keys().next().value!);
   }
@@ -221,11 +229,13 @@ function encoderArgs(encoder: string, megabits: number, gop: string): string[] {
 
 export function createStreamer() {
   const sessions = new Map<string, Session>();
+  let launching = 0;
+  let disposed = false;
 
   const sweeper = setInterval(() => {
     const now = Date.now();
     for (const session of sessions.values()) {
-      if (now - session.lastUsed > IDLE_MS) close(session.id);
+      if (now - session.lastUsed > IDLE_MS || (!session.paused && !session.done && now - session.lastData > IDLE_MS)) close(session.id);
     }
   }, 10_000);
   sweeper.unref();
@@ -247,12 +257,13 @@ export function createStreamer() {
   }
 
   async function launch(host: MediaHost, ffmpeg: string, args: string[]): Promise<Session> {
-    while (sessions.size >= MAX_SESSIONS) {
-      const oldest = [...sessions.values()].sort((a, b) => a.lastUsed - b.lastUsed)[0];
-      if (!oldest) break;
-      close(oldest.id);
-    }
-    const child = await host.spawn(ffmpeg, args);
+    if (disposed) throw new Error("Playback is closed");
+    if (sessions.size + launching >= MAX_SESSIONS) throw new Error("All playback slots are in use");
+    launching += 1;
+    let child: Child;
+    try { child = await host.spawn(ffmpeg, args); }
+    finally { launching -= 1; }
+    if (disposed) { child.kill("SIGKILL"); throw new Error("Playback is closed"); }
     const session: Session = {
       id: randomUUID(),
       child,
@@ -265,9 +276,11 @@ export function createStreamer() {
       lastUsed: Date.now(),
       waiters: [],
       started: false,
+      lastData: Date.now(),
     };
     child.stdout.on("data", (chunk: Buffer) => {
       if (!sessions.has(session.id)) return;
+      session.lastData = Date.now();
       session.chunks.push(chunk);
       session.queued += chunk.length;
       if (session.queued >= HIGH_WATER && !session.paused) {
@@ -441,14 +454,7 @@ export function createStreamer() {
     const session = sessions.get(id);
     if (!session) throw new Error("Playback session expired");
     session.lastUsed = Date.now();
-    const waitForData = (ms: number) =>
-      new Promise<void>((resolve) => {
-        const timer = setTimeout(resolve, ms);
-        session.waiters.push(() => {
-          clearTimeout(timer);
-          resolve();
-        });
-      });
+    const waitForData = (ms: number) => waitForStreamData(session.waiters, ms);
     if (session.queued === 0 && !session.done) await waitForData(LONG_POLL_MS);
     // ffmpeg writes in pipe-sized pieces of about 64 KB. Gather a batch before answering, so a
     // remote connection with a 100 ms round trip is not limited to a few hundred KB per second.
@@ -490,9 +496,27 @@ export function createStreamer() {
   }
 
   function dispose(): void {
+    disposed = true;
+    indexEpoch += 1;
+    for (const child of indexChildren) child.kill("SIGKILL");
+    indexChildren.clear();
+    keyframeIndexes.clear();
     clearInterval(sweeper);
     for (const id of [...sessions.keys()]) close(id);
   }
 
   return { open, read, close, dispose };
+}
+
+export function waitForStreamData(waiters: (() => void)[], ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    const done = () => {
+      clearTimeout(timer);
+      const index = waiters.indexOf(done);
+      if (index >= 0) waiters.splice(index, 1);
+      resolve();
+    };
+    const timer = setTimeout(done, ms);
+    waiters.push(done);
+  });
 }
