@@ -41,9 +41,6 @@ function SessionUsageContent({ theme, layout, ...target }: PluginButtonContentPr
     return (
       <View style={rootStyle}>
         {note(`No usage recorded yet for session ${shortSessionId(data.providerSessionId)}.`)}
-        {note(
-          "ccusage reads Claude Code, Codex and other supported agents' logs. Usage appears after the first turn.",
-        )}
       </View>
     );
   }
@@ -151,8 +148,7 @@ interface AgentLike {
 }
 
 /**
- * A composer pill per agent with this session's token total. Pills stay hidden until ccusage has
- * usage for the agent's provider session, so agents ccusage cannot read show nothing.
+ * A composer pill per agent, shown once the report has recorded usage for its provider session.
  */
 export function contributeSessionPills(client: PluginClientContext): () => void {
   const pills = new Map<string, PluginButtonRegistration>();

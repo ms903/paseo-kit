@@ -10,8 +10,10 @@ import type { DiskUsage, HostSample, MemoryPressure, MemoryUsage } from "../shar
 const execFileAsync = promisify(execFile);
 
 const SAMPLE_INTERVAL_MS = 2000;
+const SAMPLE_GAP_MS = 10_000;
 // Disk usage moves slowly; there is no point in asking the kernel every two seconds.
 const DISK_INTERVAL_MS = 30_000;
+const MAC_MEMORY_INTERVAL_MS = 10_000;
 const HISTORY_LENGTH = 90;
 // Virtual interfaces mirror traffic already counted on the physical one.
 const IGNORED_INTERFACE = /^(lo|veth|docker|br-|virbr)/;
@@ -121,12 +123,12 @@ export function macMemoryFromVmStat(output: string, totalBytes: number): Omit<Me
   };
 }
 
-async function readMacPressure(): Promise<MemoryPressure | null> {
+async function readMacPressure(signal: AbortSignal): Promise<MemoryPressure | null> {
   try {
     const { stdout } = await execFileAsync(
       "/usr/sbin/sysctl",
       ["-n", "kern.memorystatus_vm_pressure_level"],
-      { timeout: MAC_COMMAND_TIMEOUT_MS },
+      { signal, timeout: MAC_COMMAND_TIMEOUT_MS, maxBuffer: 64 * 1024 },
     );
     return MAC_PRESSURE_LEVELS[stdout.trim()] ?? null;
   } catch {
@@ -135,14 +137,14 @@ async function readMacPressure(): Promise<MemoryPressure | null> {
 }
 
 /** macOS: page counts from vm_stat and the pressure level from sysctl; null if vm_stat fails. */
-async function readMacMemory(): Promise<MemoryUsage | null> {
+async function readMacMemory(signal: AbortSignal): Promise<MemoryUsage | null> {
   const totalBytes = os.totalmem();
   const [vmStat, pressure] = await Promise.all([
-    execFileAsync("/usr/bin/vm_stat", [], { timeout: MAC_COMMAND_TIMEOUT_MS }).then(
+    execFileAsync("/usr/bin/vm_stat", [], { signal, timeout: MAC_COMMAND_TIMEOUT_MS, maxBuffer: 64 * 1024 }).then(
       ({ stdout }) => stdout,
       () => null,
     ),
-    readMacPressure(),
+    readMacPressure(signal),
   ]);
   const memory = vmStat === null ? null : macMemoryFromVmStat(vmStat, totalBytes);
   return memory ? { ...memory, pressure } : null;
@@ -208,48 +210,52 @@ function readLocalMounts(): Mount[] {
   return [...byDevice.values()].sort((a, b) => a.mount.localeCompare(b.mount));
 }
 
-async function readDisks(): Promise<DiskUsage[]> {
-  const disks = await Promise.all(
-    readLocalMounts().map(async ({ device, mount, fsType }): Promise<DiskUsage | null> => {
-      try {
-        const fs = await statfs(mount);
-        if (fs.blocks === 0) return null;
-        // Like df: used is everything not free, so blocks reserved for root count as neither.
-        const totalBytes = fs.blocks * fs.bsize;
-        return {
-          mount,
-          device,
-          fsType,
-          totalBytes,
-          usedBytes: totalBytes - fs.bfree * fs.bsize,
-          availableBytes: fs.bavail * fs.bsize,
-        };
-      } catch {
-        return null;
-      }
-    }),
-  );
-  return disks.filter((disk): disk is DiskUsage => disk !== null);
+async function readDisks(signal: AbortSignal): Promise<DiskUsage[]> {
+  const disks: DiskUsage[] = [];
+  // One statfs at a time keeps a slow mount from occupying the worker pool.
+  for (const { device, mount, fsType } of readLocalMounts()) {
+    if (signal.aborted) break;
+    const fs = await statfs(mount).catch(() => null);
+    if (!fs?.blocks) continue;
+    const totalBytes = fs.blocks * fs.bsize;
+    disks.push({
+      mount,
+      device,
+      fsType,
+      totalBytes,
+      usedBytes: totalBytes - fs.bfree * fs.bsize,
+      availableBytes: fs.bavail * fs.bsize,
+    });
+  }
+  return disks;
 }
 
 export type HostStats = RpcOutput<typeof hostStatsRpc>;
 
+interface HostReading {
+  current: HostSample;
+  cpu: CpuTimes;
+  net: NetworkTotals | null;
+  memory: MemoryUsage;
+}
+
 export function startSampler(): { read(): Promise<HostStats>; stop(): void } {
   const isMac = process.platform === "darwin";
+  const lifetime = new AbortController();
   const history: HostSample[] = [];
-  let previousCpu = readCpuTimes();
-  let previousNet = readNetworkTotals();
-  let previousAt = Date.now();
-  let networkTotals = previousNet;
+  let latest: HostReading | null = null;
+  let cpuInfo: Pick<HostStats, "cpuCount" | "cpuModel"> | null = null;
   let disks: DiskUsage[] = [];
   let diskRead: Promise<void> | null = null;
+  let nextDiskReadAt = 0;
   let macMemory: MemoryUsage | null = null;
   let macMemoryRead: Promise<void> | null = null;
-  let memory = readMemory();
+  let nextMacMemoryReadAt = 0;
 
-  // vm_stat runs as a separate process, so each tick uses the reading the previous one started.
-  const refreshMacMemory = () => {
-    macMemoryRead ??= readMacMemory()
+  const refreshMacMemory = (now: number) => {
+    if (macMemoryRead || now < nextMacMemoryReadAt) return macMemoryRead;
+    nextMacMemoryReadAt = now + MAC_MEMORY_INTERVAL_MS;
+    macMemoryRead = readMacMemory(lifetime.signal)
       .then((next) => {
         if (next) macMemory = next;
       })
@@ -259,36 +265,34 @@ export function startSampler(): { read(): Promise<HostStats>; stop(): void } {
     return macMemoryRead;
   };
 
-  const tick = () => {
-    const now = Date.now();
+  const sample = (now: number): HostReading => {
+    const elapsed = now - (latest?.current.at ?? now);
+    const previous = elapsed > 0 && elapsed <= SAMPLE_GAP_MS ? latest : null;
+    if (!previous) history.length = 0;
     const cpu = readCpuTimes();
     const net = readNetworkTotals();
-    const seconds = Math.max((now - previousAt) / 1000, 0.001);
-    const totalDelta = cpu.total - previousCpu.total;
-    const idleDelta = cpu.idle - previousCpu.idle;
-    if (isMac) void refreshMacMemory();
-    memory = macMemory ?? readMemory();
+    const seconds = elapsed / 1000;
+    const totalDelta = previous ? cpu.total - previous.cpu.total : 0;
+    const idleDelta = previous ? cpu.idle - previous.cpu.idle : 0;
+    if (isMac) void refreshMacMemory(now);
+    const memory = macMemory ?? readMemory();
 
-    const sample: HostSample = {
+    const current: HostSample = {
       at: now,
       cpuPercent: totalDelta > 0 ? (1 - idleDelta / totalDelta) * 100 : 0,
       memoryPercent: (memory.usedBytes / memory.totalBytes) * 100,
-      rxBytesPerSec: net && previousNet ? Math.max(net.rx - previousNet.rx, 0) / seconds : 0,
-      txBytesPerSec: net && previousNet ? Math.max(net.tx - previousNet.tx, 0) / seconds : 0,
+      rxBytesPerSec: net && previous?.net ? Math.max(net.rx - previous.net.rx, 0) / seconds : 0,
+      txBytesPerSec: net && previous?.net ? Math.max(net.tx - previous.net.tx, 0) / seconds : 0,
     };
-    history.push(sample);
+    history.push(current);
     if (history.length > HISTORY_LENGTH) history.shift();
-
-    previousCpu = cpu;
-    previousNet = net;
-    previousAt = now;
-    networkTotals = net;
+    return { current, cpu, net, memory };
   };
 
-  const refreshDisks = () => {
-    // A slow disk must not pile up reads behind it.
-    if (diskRead) return;
-    diskRead = readDisks()
+  const refreshDisks = (now: number) => {
+    if (diskRead || now < nextDiskReadAt) return;
+    nextDiskReadAt = now + DISK_INTERVAL_MS;
+    diskRead = readDisks(lifetime.signal)
       .then((next) => {
         disks = next;
       })
@@ -298,44 +302,37 @@ export function startSampler(): { read(): Promise<HostStats>; stop(): void } {
       });
   };
 
-  // On macOS the first sample waits for vm_stat, so the history does not open with os.freemem's figure.
-  const firstSample = isMac ? refreshMacMemory().then(tick) : Promise.resolve(tick());
-  refreshDisks();
-  const timer = setInterval(tick, SAMPLE_INTERVAL_MS);
-  const diskTimer = setInterval(refreshDisks, DISK_INTERVAL_MS);
-
   return {
     async read() {
-      await firstSample;
-      const cpus = os.cpus();
+      if (isMac && !latest && !lifetime.signal.aborted) await refreshMacMemory(Date.now());
+      if (lifetime.signal.aborted) throw new Error("Host monitor stopped");
+      const now = Date.now();
+      if (!latest || now < latest.current.at || now - latest.current.at >= SAMPLE_INTERVAL_MS) {
+        latest = sample(now);
+      }
+      refreshDisks(now);
+      if (!cpuInfo) {
+        const cpus = os.cpus();
+        cpuInfo = { cpuCount: cpus.length, cpuModel: cpus[0]?.model ?? "unknown" };
+      }
       const [one = 0, five = 0, fifteen = 0] = os.loadavg();
-      const current = history[history.length - 1];
+      const { current, memory, net } = latest;
       return {
         hostname: os.hostname(),
         platform: `${os.type()} ${os.release()}`,
         uptimeSeconds: os.uptime(),
-        cpuCount: cpus.length,
-        cpuModel: cpus[0]?.model ?? "unknown",
+        ...cpuInfo,
         loadAverage: [one, five, fifteen],
         memory,
-        network: networkTotals
-          ? { rxTotalBytes: networkTotals.rx, txTotalBytes: networkTotals.tx }
-          : null,
+        network: net ? { rxTotalBytes: net.rx, txTotalBytes: net.tx } : null,
         disks,
         sampleIntervalMs: SAMPLE_INTERVAL_MS,
-        current: current ?? {
-          at: Date.now(),
-          cpuPercent: 0,
-          memoryPercent: 0,
-          rxBytesPerSec: 0,
-          txBytesPerSec: 0,
-        },
+        current,
         history: [...history],
       };
     },
     stop() {
-      clearInterval(timer);
-      clearInterval(diskTimer);
+      lifetime.abort();
     },
   };
 }

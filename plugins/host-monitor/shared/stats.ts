@@ -29,6 +29,23 @@ const memorySchema = z.object({
   pressure: z.enum(["normal", "warning", "critical"]).nullable(),
 });
 
+const gpuSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  utilizationPercent: z.number().nullable(),
+  vramUsedBytes: z.number().nullable(),
+  vramTotalBytes: z.number().nullable(),
+  temperatureCelsius: z.number().nullable(),
+});
+
+export const GPU_REFRESH_MS = 10_000;
+
+export const gpuStatsRpc = defineRpc({
+  name: "host.gpus",
+  input: z.object({}),
+  output: z.array(gpuSchema),
+});
+
 export const hostStatsRpc = defineRpc({
   name: "host.stats",
   input: z.object({}),
@@ -54,3 +71,4 @@ export type HostSample = z.infer<typeof sampleSchema>;
 export type DiskUsage = z.infer<typeof diskSchema>;
 export type MemoryUsage = z.infer<typeof memorySchema>;
 export type MemoryPressure = NonNullable<MemoryUsage["pressure"]>;
+export type GpuUsage = z.infer<typeof gpuSchema>;

@@ -1,7 +1,8 @@
 import v8 from "node:v8";
 import type { PluginServerContext } from "@getpaseo/plugin/server";
+import { createGpuSampler } from "./server/gpus";
 import { startSampler } from "./server/sampler";
-import { hostStatsRpc } from "./shared/stats";
+import { gpuStatsRpc, hostStatsRpc } from "./shared/stats";
 
 // The plugin process validates every daemon message with one generated function of about 11 MB
 // (`safeParse_WSOutboundMessageSchema` in @getpaseo/protocol). Once it is hot, V8's Maglev compiler
@@ -13,6 +14,11 @@ v8.setFlagsFromString("--no-maglev");
 
 export default function contribute(server: PluginServerContext) {
   const sampler = startSampler();
+  const gpus = createGpuSampler();
   server.handle(hostStatsRpc, () => sampler.read());
-  return () => sampler.stop();
+  server.handle(gpuStatsRpc, () => gpus.read());
+  return () => {
+    sampler.stop();
+    gpus.stop();
+  };
 }

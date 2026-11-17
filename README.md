@@ -24,8 +24,9 @@ complete, self-contained Paseo plugin project.
 
 - One sidebar footer line: CPU, RAM and disk percentage with small meters, then download and upload speed under one icon.
 - Yellow above 70%, red above 90%; on a narrow sidebar network speed is dropped first, then disk.
-- Popover with about three minutes of history per metric, usage of each local disk, uptime and load average.
-- Samples every 2 s on the daemon, keeps history in memory. Network speed needs Linux.
+- Popover with about three minutes of history per metric, available space on each local disk, uptime and load average.
+- **Details** shows GPU status and the host picker when Host Monitor is installed on multiple hosts.
+- Samples on demand, with CPU and network readings at most every 2 s and GPU readings every 10 s while Details is open. History stays in memory.
 
 ### ccusage-stats
 
@@ -34,7 +35,7 @@ complete, self-contained Paseo plugin project.
   the day view also states your typical day and average daily cost.
 - Full **Token usage** screen (also in the Command Center): 30 days / 12 weeks / 12 months of history,
   cost per million tokens, cache hit rate, per-agent and per-model breakdown, recent sessions.
-- A composer pill on each agent with the token total of its current provider session.
+- A composer pill shows the token total of the current provider session, including Antigravity conversations started in Paseo.
 - Antigravity app, IDE and CLI usage is read from local conversation databases, including live WAL updates. Costs use Google and Anthropic public prices for input, output and cache tokens.
 - Counts every agent ccusage supports (Claude Code, Codex, Gemini CLI, OpenCode, Amp, ...).
   Use **Update prices** in Token usage to refresh the public model prices from Models.dev.
@@ -104,7 +105,7 @@ paseo-kit does not vendor any third-party code. Dependencies are declared per pl
 | [Paseo](https://github.com/getpaseo/paseo) daemon and app | >= 0.11.1 | Declared as `requirements.paseo` in each `paseo-plugin.json`. |
 | Node.js and npm | Node 22.13+ | On the daemon host, for installing dependencies and the `ccusage-stats` build step. |
 | `paseo` CLI | same as the daemon | On the daemon's PATH, for `tab-recovery` to restore agents. Present with a standard install. |
-| Linux `/proc` | - | `host-monitor` network speed, available memory and the disk list. Other systems show CPU, RAM and the root disk only. |
+| Linux `/proc` | - | `host-monitor` network speed, available memory and the disk list. Outside Linux the disk display uses the root volume. |
 | ffmpeg (ffprobe optional), Python 3 on SSH hosts | 6 or later recommended | On the daemon host for `media-studio`, with libx264; also on any SSH host whose files it previews. |
 | `ssh` client | - | Only for `media-studio` files on SSH hosts; keys must work without a prompt. |
 

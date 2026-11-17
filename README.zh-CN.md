@@ -20,15 +20,16 @@
 
 - 侧边栏底部一行：CPU、内存、磁盘百分比与小进度条，以及共用一个图标的下载 / 上传速度。
 - 超过 70% 变黄，超过 90% 变红；侧边栏较窄时先隐藏网速，再隐藏磁盘。
-- 弹出层展示每项指标约三分钟的历史、每块本地磁盘的用量、运行时间和负载。
-- daemon 每 2 秒采样一次，历史保存在内存中。网速仅支持 Linux。
+- 弹出层展示每项指标约三分钟的历史，每块本地磁盘的用量和剩余空间，以及运行时间和负载。
+- **Details** 页面显示显卡状态。多台 host 安装 Host Monitor 时，可在页面顶部切换 host。
+- 按需采样，CPU 和网速最快每 2 秒更新，GPU 在打开 **Details** 时每 10 秒更新。历史保存在内存中，网速仅支持 Linux。
 
 ### ccusage-stats
 
 - 侧边栏底部一行：今日 token 总量、对比典型一天费用（近 28 天活跃日的中位数）的进度条、估算费用。
 - 弹出层：日 / 周 / 月总量、与上一周期的对比、堆叠柱状图；日视图另附典型一天与日均消耗。
 - 完整的 **Token usage** 页面（也可从 Command Center 打开）：30 天 / 12 周 / 12 个月历史、每百万 token 成本、缓存命中率、按 agent 和模型拆分、最近的 session。
-- 每个 agent 的输入框上方有一个 pill，显示当前 provider session 的 token 总量。
+- 输入框上方的按钮显示当前 provider session 的 token 总量，也支持在 Paseo 里打开的 Antigravity 会话。
 - 统计 ccusage 支持的所有 agent（Claude Code、Codex、Gemini CLI、OpenCode、Amp 等）。费用按公开 API 单价计算。在 **Token usage** 页面点击 **Update prices** 可从 Models.dev 更新价目表。
 
 ### file-download
@@ -73,7 +74,7 @@
 | [Paseo](https://github.com/getpaseo/paseo) daemon 与 app | >= 0.11.1 | 在各 `paseo-plugin.json` 的 `requirements.paseo` 中声明。 |
 | Node.js 与 npm | 建议 Node 22+ | 位于 daemon 主机，用于安装依赖和执行 `ccusage-stats` 的 build 步骤。 |
 | `paseo` CLI | 与 daemon 相同 | 需在 daemon 的 PATH 中，`tab-recovery` 用它恢复 agent。标准安装自带。 |
-| Linux `/proc` | - | `host-monitor` 的网速、可用内存与磁盘列表。其他系统只显示 CPU、内存和根分区。 |
+| Linux `/proc` | - | `host-monitor` 的网速、可用内存与磁盘列表。其他系统的磁盘指标来自根分区。 |
 | ffmpeg（ffprobe 可选） | 建议 6 及以上 | `media-studio` 需要，位于 daemon 主机，需含 libx264；预览 SSH 主机上的文件时，该主机也需要。 |
 | `ssh` 客户端 | - | 仅 `media-studio` 预览 SSH 主机文件时需要，密钥需免交互登录。 |
 

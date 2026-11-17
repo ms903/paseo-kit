@@ -14,6 +14,8 @@ import {
   generationCost,
 } from "../plugins/ccusage-stats/server/antigravity-prices";
 import { parsePriceCatalog } from "../plugins/ccusage-stats/server/price-catalog";
+import { createSessionMatcher } from "../plugins/ccusage-stats/server/sessions";
+import { EMPTY_USAGE } from "../plugins/ccusage-stats/shared/usage";
 function vi(value: number): Buffer {
   const out: number[] = [];
   let v = BigInt(value);
@@ -33,6 +35,40 @@ function msg(n: number, v: Buffer | string) {
   return Buffer.concat([vi(n * 8 + 2), vi(b.length), b]);
 }
 const seconds = Date.parse("2026-11-15T23:30:00Z") / 1000;
+
+test("matches Antigravity persistence to the conversation row for its composer pill", async () => {
+  const conversationId = "b966b16a-caf4-448a-bb24-0e34956022b0";
+  const persisted = { version: 1, data: { conversationId } };
+  const agent = { provider: "antigravity", sessionId: `plugin:${JSON.stringify(persisted)}` };
+  const session = {
+    id: conversationId,
+    agent: "antigravity",
+    usage: { ...EMPTY_USAGE, inputTokens: 300, totalTokens: 300, cost: 0.00045 },
+    models: [],
+    lastActivity: null,
+  };
+  const codex = { ...session, agent: "codex", id: "2026/11/15/rollout-2026-11-15-thread" };
+  const other = { ...session, agent: "claude" };
+  const persistence = new Map([
+    ["with-metadata", { ...agent, metadata: { pluginProviderPersistence: persisted } }],
+    ["encoded-only", agent],
+    ["native", { ...agent, nativeHandle: conversationId }],
+    ["malformed", { ...agent, sessionId: "plugin:{" }],
+    ["codex", { provider: "codex", sessionId: "thread" }],
+  ]);
+  const paseo = {
+    agents: { ref: (id: string) => ({ refresh: async () => ({ agent: { persistence: persistence.get(id) } }) }) },
+  } as Parameters<ReturnType<typeof createSessionMatcher>["resolve"]>[1];
+  const matcher = createSessionMatcher({ sessions: async () => [other, codex, session] });
+
+  const { sessions } = await matcher.resolve({ agentIds: [...persistence.keys()] }, paseo);
+  for (const [index, agentId] of ["with-metadata", "encoded-only", "native"].entries()) {
+    assert.deepEqual(sessions[index], { status: "matched", agentId, providerSessionId: conversationId, session });
+  }
+  assert.deepEqual(sessions[3], { status: "unknown", agentId: "malformed" });
+  assert.deepEqual(sessions[4], { status: "matched", agentId: "codex", providerSessionId: "thread", session: codex });
+});
+
 function generation(
   input = 200,
   output = 10,

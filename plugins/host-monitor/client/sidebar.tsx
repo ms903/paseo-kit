@@ -1,9 +1,10 @@
 import type { PluginTheme, RpcOutput } from "@getpaseo/plugin";
-import type { PluginPopoverProps, PluginSidebarItemProps } from "@getpaseo/plugin/client";
+import type { PluginHostProps, PluginPopoverProps, PluginScreenProps, PluginSidebarItemProps } from "@getpaseo/plugin/client";
 import { Icon } from "@getpaseo/plugin/client/react-native";
-import { useCallback, useState } from "react";
+import { useCallback, useState, type ReactNode } from "react";
 import {
   Pressable,
+  ScrollView,
   Text,
   View,
   type LayoutChangeEvent,
@@ -11,6 +12,7 @@ import {
 } from "react-native";
 import type { hostStatsRpc } from "../shared/stats";
 import { formatBytes, formatCompactRate, formatPercent, formatRate, formatUptime } from "./format";
+import { GpuSection } from "./gpus";
 import {
   Meter,
   Sparkline,
@@ -37,6 +39,8 @@ const METER_HEIGHT = 6;
 // Between the download and upload numbers that share one icon.
 const PAIR_SEPARATOR = "/";
 const PAIR_SEPARATOR_WIDTH = 8;
+
+export const HOST_MONITOR_SCREEN_ID = "host-monitor";
 
 type HostStats = RpcOutput<typeof hostStatsRpc>;
 
@@ -214,29 +218,32 @@ function triggerStyle(theme: PluginTheme) {
   });
 }
 
-function describe(stats: HostStats): string {
+function describe(hostLabel: string, stats: HostStats): string {
   const { current, memory, network, disks } = stats;
   const parts = [
     `CPU ${formatPercent(current.cpuPercent)}`,
     `memory ${formatPercent(memoryPercent(memory))}`,
   ];
   if (memory.pressure) parts.push(`memory pressure ${memory.pressure}`);
-  if (disks.length > 0) parts.push(`disk ${formatPercent(sumDisks(disks).percent)}`);
+  if (disks.length > 0) {
+    const disk = sumDisks(disks);
+    parts.push(`disk ${formatPercent(disk.percent)}, ${formatBytes(disk.availableBytes)} available`);
+  }
   if (network) {
     parts.push(
       `download ${formatRate(current.rxBytesPerSec)}`,
       `upload ${formatRate(current.txBytesPerSec)}`,
     );
   }
-  return `Host status: ${parts.join(", ")}`;
+  return `${hostLabel} host status, ${parts.join(", ")}`;
 }
 
 function layoutWidth(event: LayoutChangeEvent): number {
   return event.nativeEvent.layout.width;
 }
 
-export function HostStatusItem({ theme, openPopover }: PluginSidebarItemProps) {
-  const { data } = useHostStats();
+export function HostStatusItem({ theme, host, openPopover }: PluginSidebarItemProps) {
+  const { data } = useHostStats(host.id);
   const [available, setAvailable] = useState<number | null>(null);
   const [measuredSlot, setMeasuredSlot] = useState<number | null>(null);
   const onAvailable = useCallback((e: LayoutChangeEvent) => setAvailable(layoutWidth(e)), []);
@@ -254,7 +261,7 @@ export function HostStatusItem({ theme, openPopover }: PluginSidebarItemProps) {
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={describe(data)}
+      accessibilityLabel={describe(host.label, data)}
       onPress={() => openPopover(HostPopover)}
       style={triggerStyle(theme)}
     >
@@ -349,6 +356,7 @@ function DiskSection({ theme, disks }: { theme: PluginTheme; disks: HostStats["d
           {formatPercent(total.percent)}
         </Text>
       </View>
+      <Caption theme={theme} text={`${formatBytes(total.availableBytes)} available`} />
       {/* statfs on an APFS volume counts every volume sharing its container, so say so: Finder and
           other tools often show the data volume alone. */}
       {disks.some((disk) => disk.fsType === "apfs") ? (
@@ -375,12 +383,12 @@ function DiskSection({ theme, disks }: { theme: PluginTheme; disks: HostStats["d
                   fontVariant: ["tabular-nums"],
                 }}
               >
-                {formatBytes(disk.usedBytes)} / {formatBytes(disk.totalBytes)} ·{" "}
-                <Text style={{ color: percent >= 70 ? loadColor(theme, percent) : theme.colors.foreground }}>
-                  {formatPercent(percent)}
-                </Text>
+                {formatPercent(percent)}
               </Text>
             </View>
+            <Text style={{ color: theme.colors.foregroundMuted, fontSize: FONT_SIZE - 1 }}>
+              {formatBytes(disk.usedBytes)} / {formatBytes(disk.totalBytes)} · {formatBytes(disk.availableBytes)} available
+            </Text>
             <Meter theme={theme} percent={percent} height={METER_HEIGHT - 2} />
           </View>
         );
@@ -389,33 +397,11 @@ function DiskSection({ theme, disks }: { theme: PluginTheme; disks: HostStats["d
   );
 }
 
-function HostPopover({ theme, layout }: PluginPopoverProps) {
-  const { data } = useHostStats();
-  const rootStyle = {
-    gap: 10,
-    padding: layout.compact ? 16 : 12,
-    minWidth: 240,
-    backgroundColor: theme.colors.surface1,
-  };
-  if (!data) {
-    return (
-      <View style={rootStyle}>
-        <Text style={{ color: theme.colors.foregroundMuted, fontSize: FONT_SIZE }}>Loading...</Text>
-      </View>
-    );
-  }
-
+function HostMetrics({ theme, data }: { theme: PluginTheme; data: HostStats }) {
   const { current, history, memory, network, disks } = data;
 
   return (
-    <View style={rootStyle}>
-      <View style={{ gap: 2 }}>
-        <Text style={{ color: theme.colors.foreground, fontSize: FONT_SIZE + 1 }}>{data.hostname}</Text>
-        <Text style={{ color: theme.colors.foregroundMuted, fontSize: FONT_SIZE - 1 }}>
-          up {formatUptime(data.uptimeSeconds)} · load{" "}
-          {data.loadAverage.map((n) => n.toFixed(2)).join(" ")}
-        </Text>
-      </View>
+    <>
       <PreviewRow
         theme={theme}
         icon="Cpu"
@@ -454,6 +440,78 @@ function HostPopover({ theme, layout }: PluginPopoverProps) {
         </>
       ) : null}
       {disks.length > 0 ? <DiskSection theme={theme} disks={disks} /> : null}
+    </>
+  );
+}
+
+function HostDetails({ theme, host, action }: Pick<PluginHostProps, "theme" | "host"> & { action?: ReactNode }) {
+  const { data, isError } = useHostStats(host.id);
+
+  return (
+    <>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+        <View style={{ flex: 1, gap: 2 }}>
+          <Text numberOfLines={1} style={{ color: theme.colors.foreground, fontSize: FONT_SIZE + 1 }}>
+            {host.label}
+          </Text>
+          {data ? (
+            <Text style={{ color: theme.colors.foregroundMuted, fontSize: FONT_SIZE - 1 }}>
+              {data.hostname !== host.label ? `${data.hostname} · ` : ""}
+              up {formatUptime(data.uptimeSeconds)} · load{" "}
+              {data.loadAverage.map((n) => n.toFixed(2)).join(" ")}
+            </Text>
+          ) : null}
+        </View>
+        {action}
+      </View>
+      {data ? <HostMetrics theme={theme} data={data} /> : (
+        <Text style={{ color: theme.colors.foregroundMuted, fontSize: FONT_SIZE }}>
+          {isError ? "Could not load host metrics." : "Loading…"}
+        </Text>
+      )}
+    </>
+  );
+}
+
+function HostPopover({ theme, layout, host, openScreen }: PluginPopoverProps) {
+  return (
+    <View style={{ gap: 10, padding: layout.compact ? 16 : 12, minWidth: 240, backgroundColor: theme.colors.surface1 }}>
+      <HostDetails
+        theme={theme}
+        host={host}
+        action={(
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Open host monitor details"
+            onPress={() => openScreen({ screenId: HOST_MONITOR_SCREEN_ID })}
+            style={{ minHeight: 28, flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 6 }}
+          >
+            <Text style={{ color: theme.colors.accent, fontSize: FONT_SIZE }}>Details</Text>
+            <Icon name="ChevronRight" size={ICON_SIZE} color={theme.colors.accent} />
+          </Pressable>
+        )}
+      />
     </View>
+  );
+}
+
+export function HostMonitorScreen({ theme, layout, host }: PluginScreenProps) {
+  return (
+    <ScrollView contentContainerStyle={{ padding: layout.compact ? 16 : 24 }}>
+      <View style={{
+        alignSelf: "center",
+        width: "100%",
+        maxWidth: 640,
+        gap: 16,
+        padding: 16,
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: theme.colors.border,
+        backgroundColor: theme.colors.surface1,
+      }}>
+        <HostDetails theme={theme} host={host} />
+        <GpuSection theme={theme} host={host} />
+      </View>
+    </ScrollView>
   );
 }

@@ -12,11 +12,12 @@ import {
 
 const REFRESH_MS = 2000;
 
-export function useHostStats() {
+export function useHostStats(hostId: string) {
   const getStats = useRpc(hostStatsRpc);
   return useQuery({
-    queryKey: ["host-stats"],
+    queryKey: ["host-stats", hostId],
     queryFn: () => getStats({}),
+    staleTime: REFRESH_MS,
     refetchInterval: REFRESH_MS,
   });
 }
