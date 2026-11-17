@@ -72,7 +72,12 @@ const rawUsage = {
   cacheReadTokens: z.number().default(0),
 };
 
-const rawModel = z.object({ modelName: z.string(), cost: z.number().default(0), ...rawUsage });
+const rawModel = z.object({
+  modelName: z.string(),
+  cost: z.number().default(0),
+  missingPricing: z.boolean().optional(),
+  ...rawUsage,
+});
 
 const rawAgentRow = z.object({
   agent: z.string(),
@@ -100,10 +105,7 @@ export type RawAgentRow = z.infer<typeof rawAgentRow>;
 export type RawRow = z.infer<typeof rawRow>;
 export type RawReport = z.infer<typeof rawReport>;
 
-/**
- * One ccusage run loads every detected agent's logs once and emits all sections. `--offline`
- * prices from the pricing table built into ccusage instead of fetching LiteLLM's on every run.
- */
+/** One ccusage run loads the agent logs and emits all sections. */
 export function runCcusage(timezone: string, signal?: AbortSignal): Promise<RawReport> {
   const binary = locateCcusage();
   const args = [

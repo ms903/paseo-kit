@@ -4,15 +4,19 @@ import os from "node:os";
 import path from "node:path";
 import type { RawAgentRow, RawModel, RawReport, RawRow } from "./ccusage";
 import { ANTIGRAVITY_READER } from "./antigravity-reader";
-import { generationCost, modelName } from "./antigravity-prices";
+import {
+  BUILTIN_CONTEXT_BOUNDS,
+  generationCost,
+  modelName,
+} from "./antigravity-prices";
+import { EMPTY_CATALOG, type PriceCatalog } from "./price-catalog";
 
 interface Bucket {
   day: string;
   priceDay: string;
-  above100k: boolean;
+  contextSize: number;
   modelId: string;
   label: string;
-  longContext: boolean;
   inputTokens: number;
   outputTokens: number;
   cacheReadTokens: number;
@@ -89,6 +93,7 @@ export function readConversations(
   files: string[],
   timezone: string,
   signal?: AbortSignal,
+  contextBounds: readonly number[] = BUILTIN_CONTEXT_BOUNDS,
 ): Promise<Conversation[]> {
   if (files.length === 0) return Promise.resolve([]);
   return new Promise((resolve, reject) => {
@@ -113,7 +118,7 @@ export function readConversations(
         }
       },
     );
-    child.stdin!.end(JSON.stringify({ files, timezone }));
+    child.stdin!.end(JSON.stringify({ files, timezone, contextBounds }));
   });
 }
 
@@ -160,10 +165,18 @@ export async function antigravityReport(
   timezone: string,
   signal?: AbortSignal,
   root = process.env.GEMINI_DIR || path.join(os.homedir(), ".gemini"),
+  prices: PriceCatalog | Promise<PriceCatalog> = EMPTY_CATALOG,
 ): Promise<RawReport> {
   const files = await conversationFiles(root);
+  const catalog = files.size ? await prices : EMPTY_CATALOG;
+  const bounds = new Set<number>(BUILTIN_CONTEXT_BOUNDS);
+  for (const [name, price] of catalog) {
+    if (/^(?:gemini-|claude-)/.test(name))
+      for (const tier of price.context) bounds.add(tier.above);
+  }
+  const contextBounds = [...bounds].sort((a, b) => a - b);
   for (const entry of files.values())
-    entry.signature = `${timezone}:${entry.signature}`;
+    entry.signature = `${timezone}:${contextBounds.join(",")}:${entry.signature}`;
   const live = new Set([...files.values()].map((entry) => entry.file));
   for (const file of cached.keys()) if (!live.has(file)) cached.delete(file);
   const changed = [...files.values()].filter(
@@ -173,6 +186,7 @@ export async function antigravityReport(
     changed.map((entry) => entry.file),
     timezone,
     signal,
+    contextBounds,
   );
   for (const conversation of refreshed) {
     if (conversation.error) {
@@ -200,7 +214,7 @@ export async function antigravityReport(
       lastActivity: new Date(conversation.lastActivity).toISOString(),
     };
     for (const bucket of conversation.buckets) {
-      const name = modelName(bucket.modelId, bucket.label);
+      const name = modelName(bucket.modelId, bucket.label, catalog);
       const model = {
         modelName: name,
         inputTokens: bucket.inputTokens,
@@ -212,9 +226,9 @@ export async function antigravityReport(
           bucket.inputTokens,
           bucket.outputTokens,
           bucket.cacheReadTokens,
-          bucket.longContext,
+          bucket.contextSize,
           bucket.priceDay,
-          bucket.above100k,
+          catalog,
         ),
       };
       append(total, model);

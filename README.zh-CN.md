@@ -29,7 +29,7 @@
 - 弹出层：日 / 周 / 月总量、与上一周期的对比、堆叠柱状图；日视图另附典型一天与日均消耗。
 - 完整的 **Token usage** 页面（也可从 Command Center 打开）：30 天 / 12 周 / 12 个月历史、每百万 token 成本、缓存命中率、按 agent 和模型拆分、最近的 session。
 - 每个 agent 的输入框上方有一个 pill，显示当前 provider session 的 token 总量。
-- 统计 ccusage 支持的所有 agent（Claude Code、Codex、Gemini CLI、OpenCode、Amp 等）。费用按官方公开 API 单价计算。
+- 统计 ccusage 支持的所有 agent（Claude Code、Codex、Gemini CLI、OpenCode、Amp 等）。费用按公开 API 单价计算。在 **Token usage** 页面点击 **Update prices** 可从 Models.dev 更新价目表。
 
 ### file-download
 
@@ -81,8 +81,8 @@
 
 | 包 | 版本 | 许可证 | 使用者 |
 | --- | --- | --- | --- |
-| [`ccusage`](https://github.com/ccusage/ccusage) | 20.0.29 | MIT | `ccusage-stats` |
-| `@ccusage/ccusage-<platform>-<arch>` | 20.0.29 | MIT | `ccusage-stats`（原生二进制，`ccusage` 的可选依赖） |
+| [`ccusage`](https://github.com/ccusage/ccusage) | 20.0.51 | MIT | `ccusage-stats` |
+| `@ccusage/ccusage-<platform>-<arch>` | 20.0.51 | MIT | `ccusage-stats`（原生二进制，`ccusage` 的可选依赖） |
 
 `host-monitor`、`file-download`、`tab-recovery` 和 `media-studio` 没有运行时 npm 依赖。
 

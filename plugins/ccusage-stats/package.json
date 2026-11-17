@@ -35,6 +35,6 @@
     "zod": "^4.4.3"
   },
   "dependencies": {
-    "ccusage": "20.0.29"
+    "ccusage": "20.0.51"
   }
 }

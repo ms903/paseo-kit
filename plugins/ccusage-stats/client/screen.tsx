@@ -1,11 +1,12 @@
 import type { PluginTheme } from "@getpaseo/plugin";
-import type { PluginScreenProps } from "@getpaseo/plugin/client";
-import { Icon } from "@getpaseo/plugin/client/react-native";
+import { useRpc, type PluginScreenProps } from "@getpaseo/plugin/client";
+import { Icon, useToast } from "@getpaseo/plugin/client/react-native";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
 import { Pressable, ScrollView, Text, View, type PressableStateCallbackType } from "react-native";
-import type { PeriodKind, SessionUsage, UsagePeriod } from "../shared/usage";
+import { updatePricesRpc, type PeriodKind, type SessionUsage, type UsagePeriod } from "../shared/usage";
 import { Legend, PERIOD_OPTIONS, PeriodBars, Segmented, SwatchDot } from "./charts";
-import { agentSwatch, useUsageReport, type UsageReport } from "./data";
+import { agentSwatch, SESSION_USAGE_KEY, USAGE_REPORT_KEY, useUsageReport, type UsageReport } from "./data";
 import {
   agentLabel,
   CURRENT_LABEL,
@@ -307,13 +308,43 @@ function Body({
 
 export function UsageScreen({ theme, layout }: PluginScreenProps) {
   const { data, error, isPending, refetch, isRefetching } = useUsageReport();
+  const updatePrices = useRpc(updatePricesRpc);
+  const queryClient = useQueryClient();
+  const toast = useToast();
+  const priceUpdate = useMutation({
+    mutationFn: () => updatePrices({}),
+    retry: false,
+    onSuccess: async (report) => {
+      await queryClient.cancelQueries({ queryKey: USAGE_REPORT_KEY });
+      queryClient.setQueryData(USAGE_REPORT_KEY, report);
+      void queryClient.invalidateQueries({ queryKey: SESSION_USAGE_KEY });
+    },
+    onError: () => toast.error("Could not update prices"),
+  });
   const padding = layout.compact ? 16 : 24;
   return (
     <ScrollView
       style={{ flex: 1, backgroundColor: theme.colors.surface0 }}
       contentContainerStyle={{ padding, alignItems: "center" }}
     >
-      <View style={{ width: "100%", maxWidth: MAX_CONTENT_WIDTH }}>
+      <View style={{ width: "100%", maxWidth: MAX_CONTENT_WIDTH, gap: 12 }}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityState={{ busy: priceUpdate.isPending, disabled: priceUpdate.isPending }}
+          disabled={priceUpdate.isPending}
+          onPress={() => priceUpdate.mutate()}
+          style={({ hovered }: HoverState) => ({
+            alignSelf: "flex-end", flexDirection: "row", alignItems: "center", gap: 6,
+            paddingVertical: 6, paddingHorizontal: 12, borderRadius: 8,
+            borderWidth: 1, borderColor: theme.colors.border,
+            backgroundColor: hovered ? theme.colors.surface2 : theme.colors.surface1,
+          })}
+        >
+          <Icon name="RefreshCw" size={14} color={theme.colors.foregroundMuted} />
+          <Text style={{ fontSize: FONT.body, color: theme.colors.foreground }}>
+            {priceUpdate.isPending ? "Updating prices…" : "Update prices"}
+          </Text>
+        </Pressable>
         {data ? (
           <Body theme={theme} compact={layout.compact} report={data} />
         ) : (

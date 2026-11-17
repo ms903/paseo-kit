@@ -1,3 +1,10 @@
+import {
+  EMPTY_CATALOG,
+  findModelPrice,
+  priceTokens,
+  type PriceCatalog,
+} from "./price-catalog";
+
 /** USD per million tokens: input, output, cache reads. */
 type Rate = readonly [number, number, number];
 interface Price {
@@ -49,7 +56,11 @@ export const ANTIGRAVITY_PRICES: Record<string, Price> = {
   "claude-mythos-5-2": { base: [8, 40, 0.2] },
 };
 
-export function modelName(modelId: string, label: string): string {
+export function modelName(
+  modelId: string,
+  label: string,
+  catalog = EMPTY_CATALOG,
+): string {
   const id = modelId
     .trim()
     .toLowerCase()
@@ -58,9 +69,7 @@ export function modelName(modelId: string, label: string): string {
     .replace(/-preview(?:-\d{2}-\d{2})?$/, "")
     .replace(/-\d{8}$/, "");
   const gemini =
-    /^Gemini\s+(\d+(?:\.\d+)*)\s+(Flash[ -]Lite|Pro|Flash|Ultra|Nano|Carbon|Argon|Hydrogen)\b/i.exec(
-      label,
-    );
+    /^Gemini\s+(\d+(?:\.\d+)*)\s+(Flash[ -]Lite|[a-z][a-z-]*)\b/i.exec(label);
   const claude =
     /^Claude\s+(Opus|Sonnet|Haiku|Fable|Mythos)\s+(\d+(?:\.\d+)*)\b/i.exec(
       label,
@@ -70,39 +79,60 @@ export function modelName(modelId: string, label: string): string {
     : claude
       ? `claude-${claude[1]!.toLowerCase()}-${claude[2]!.replace(/\./g, "-")}`
       : "";
-  if (ANTIGRAVITY_PRICES[id]) return id;
+  if (Object.hasOwn(ANTIGRAVITY_PRICES, id) || findModelPrice(catalog, id))
+    return id;
   if (named) return named;
   return id || label || "unknown";
 }
+
+export const BUILTIN_CONTEXT_BOUNDS = [100_000, 200_000] as const;
 
 export function generationCost(
   model: string,
   input: number,
   output: number,
   cached: number,
-  longContext: boolean,
+  contextSize: number,
   day: string,
-  above100k = longContext,
+  catalog: PriceCatalog = EMPTY_CATALOG,
 ): number {
-  if (model === "gemini-2.5-pro" && day >= "2026-12-01")
+  if (model === "gemini-2.5-pro" && day >= "2026-12-01") {
     return generationCost(
       "gemini-3.8-flash",
       input,
       output,
       cached,
-      longContext,
+      contextSize,
       day,
+      catalog,
     );
-  const price = ANTIGRAVITY_PRICES[model];
+  }
+  const price = Object.hasOwn(ANTIGRAVITY_PRICES, model)
+    ? ANTIGRAVITY_PRICES[model]
+    : undefined;
+  const live = findModelPrice(catalog, model);
+  // Keep published dated schedules when recalculating historical requests.
+  if (live && !price?.fromDecember2026 && !price?.fromJanuary2027) {
+    return priceTokens(
+      {
+        inputTokens: input,
+        outputTokens: output,
+        cacheReadTokens: cached,
+        cacheCreationTokens: 0,
+      },
+      live,
+      contextSize,
+    );
+  }
   if (!price) return 0;
   const rates =
-    above100k && price.above100k
+    contextSize > 100_000 && price.above100k
       ? price.above100k
       : day >= "2027-01-01" && price.fromJanuary2027
         ? price.fromJanuary2027
         : day >= "2026-12-01" && price.fromDecember2026
           ? price.fromDecember2026
-          : longContext && price.long
+          : contextSize > 200_000 && price.long
             ? price.long
             : price.base;
   return (input * rates[0] + output * rates[1] + cached * rates[2]) / 1_000_000;

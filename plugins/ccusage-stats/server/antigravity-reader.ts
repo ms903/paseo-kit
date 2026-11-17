@@ -3,7 +3,7 @@ export const ANTIGRAVITY_READER = String.raw`
 import { DatabaseSync } from 'node:sqlite';
 let input = '';
 for await (const chunk of process.stdin) input += chunk;
-const { files, timezone } = JSON.parse(input);
+const { files, timezone, contextBounds } = JSON.parse(input);
 const formatter = new Intl.DateTimeFormat('en-CA', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit' });
 function field(buf, wanted) {
   if (!(buf instanceof Uint8Array)) return null;
@@ -71,10 +71,12 @@ for (const file of files) {
         if (!seconds) continue;
         const day = formatter.format(new Date(seconds * 1000));
         const priceDay = new Date(seconds * 1000).toISOString().slice(0, 10);
-        const above100k = inputTokens + cacheReadTokens > 100000;
-        const longContext = inputTokens + cacheReadTokens > 200000;
-        const key = JSON.stringify([day, priceDay, modelId, label, longContext, above100k]);
-        const bucket = buckets.get(key) || { day, priceDay, modelId, label, longContext, above100k, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0 };
+        const prompt = inputTokens + cacheReadTokens;
+        // One representative size for all requests in the same pricing bands.
+        const boundary = contextBounds.findLast(value => prompt > value);
+        const contextSize = boundary === undefined ? 0 : boundary + 1;
+        const key = JSON.stringify([day, priceDay, modelId, label, contextSize]);
+        const bucket = buckets.get(key) || { day, priceDay, modelId, label, contextSize, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0 };
         bucket.inputTokens += inputTokens; bucket.outputTokens += outputTokens; bucket.cacheReadTokens += cacheReadTokens;
         buckets.set(key, bucket); lastActivity = Math.max(lastActivity, seconds * 1000);
       } catch {}

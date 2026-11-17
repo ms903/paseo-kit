@@ -37,7 +37,7 @@ complete, self-contained Paseo plugin project.
 - A composer pill on each agent with the token total of its current provider session.
 - Antigravity app, IDE and CLI usage is read from local conversation databases, including live WAL updates. Costs use Google and Anthropic public prices for input, output and cache tokens.
 - Counts every agent ccusage supports (Claude Code, Codex, Gemini CLI, OpenCode, Amp, ...).
-  Costs use public API prices.
+  Use **Update prices** in Token usage to refresh the public model prices from Models.dev.
 
 ### file-download
 
@@ -112,8 +112,8 @@ paseo-kit does not vendor any third-party code. Dependencies are declared per pl
 
 | Package | Version | License | Used by |
 | --- | --- | --- | --- |
-| [`ccusage`](https://github.com/ccusage/ccusage) | 20.0.29 | MIT | `ccusage-stats` |
-| `@ccusage/ccusage-<platform>-<arch>` | 20.0.29 | MIT | `ccusage-stats` (native binary, optional dependency of `ccusage`) |
+| [`ccusage`](https://github.com/ccusage/ccusage) | 20.0.51 | MIT | `ccusage-stats` |
+| `@ccusage/ccusage-<platform>-<arch>` | 20.0.51 | MIT | `ccusage-stats` (native binary, optional dependency of `ccusage`) |
 
 `host-monitor`, `file-download`, `tab-recovery` and `media-studio` have no runtime npm dependencies.
 

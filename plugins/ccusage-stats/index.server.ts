@@ -2,7 +2,7 @@ import v8 from "node:v8";
 import type { PluginServerContext } from "@getpaseo/plugin/server";
 import { createReportCache } from "./server/report";
 import { createSessionMatcher } from "./server/sessions";
-import { sessionUsageRpc, usageReportRpc } from "./shared/usage";
+import { sessionUsageRpc, updatePricesRpc, usageReportRpc } from "./shared/usage";
 
 // The plugin process validates every daemon message with one generated function of about 11 MB
 // (`safeParse_WSOutboundMessageSchema` in @getpaseo/protocol). Once it is hot, V8's Maglev compiler
@@ -16,6 +16,7 @@ export default function contribute(server: PluginServerContext) {
   const cache = createReportCache();
   const matcher = createSessionMatcher(cache);
   server.handle(usageReportRpc, () => cache.read());
+  server.handle(updatePricesRpc, () => cache.updatePrices());
   server.handle(sessionUsageRpc, (input, { paseo }) => matcher.resolve(input, paseo));
   // A finished turn has written new usage to the agent's logs.
   server.on("agent.turn_ended", (event) => {

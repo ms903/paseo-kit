@@ -20,7 +20,10 @@ The daemon runs ccusage once for all views and caches the result for a minute. W
 
 ccusage is bundled with the plugin, so nothing needs to be on the daemon's `PATH`. The bundled build covers macOS, Linux and Windows on x64 and arm64; elsewhere a `ccusage` on the daemon's `PATH` is used. Requires Paseo 0.11.1 or later.
 
-Days and weeks use the daemon's timezone, and weeks start on Monday. Costs come from the pricing table built into ccusage (`--offline`), so nothing is fetched from the network. Antigravity costs use Google's and Anthropic's public API prices. Only usage written to logs on the daemon's machine is counted; agents on other machines and logs that an agent has deleted or rotated are not. The plugin reads local log files and sends nothing off the host.
+Days and weeks use the daemon's timezone, and weeks start on Monday. The daemon reads usage from
+local logs. **Update prices** in Token usage fetches the public Models.dev catalog and recalculates
+the report. The daemon saves the catalog for later reports. GPT-6.2 Sol, GPT-6.2 Astra and Gemini 4
+Hydrogen have built-in rates.
 
 Antigravity app, IDE and CLI are included. The plugin reads generation metadata from
 `~/.gemini/antigravity*/conversations/*.db`, including committed WAL updates, and groups

@@ -14,13 +14,15 @@ import {
 // picks that up. ccusage reads whole log files, so there is no point polling faster.
 const REPORT_REFRESH_MS = 30_000;
 const SESSION_REFRESH_MS = 20_000;
+export const USAGE_REPORT_KEY = ["usage-report"] as const;
+export const SESSION_USAGE_KEY = ["session-usage"] as const;
 
 export type UsageReport = RpcOutput<typeof usageReportRpc>;
 
 export function useUsageReport() {
   const getReport = useRpc(usageReportRpc);
   return useQuery({
-    queryKey: ["usage-report"],
+    queryKey: USAGE_REPORT_KEY,
     queryFn: () => getReport({}),
     refetchInterval: REPORT_REFRESH_MS,
     staleTime: REPORT_REFRESH_MS / 2,
@@ -30,7 +32,7 @@ export function useUsageReport() {
 export function useSessionUsage(agentId: string) {
   const getSessions = useRpc(sessionUsageRpc);
   return useQuery({
-    queryKey: ["session-usage", agentId],
+    queryKey: [...SESSION_USAGE_KEY, agentId],
     queryFn: async () => {
       const { sessions } = await getSessions({ agentIds: [agentId] });
       return sessions[0] ?? { status: "unknown" as const, agentId };

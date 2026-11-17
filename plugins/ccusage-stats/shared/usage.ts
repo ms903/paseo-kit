@@ -34,25 +34,33 @@ const sessionSchema = z.object({
   lastActivity: z.string().nullable(),
 });
 
+const usageReportSchema = z.object({
+  /** When ccusage last produced this report, in epoch milliseconds. */
+  generatedAt: z.number(),
+  /** The daemon's local date, the same calendar ccusage groups by. */
+  today: z.string(),
+  timezone: z.string(),
+  /** Every agent seen in the report, heaviest first: a stable order for colors. */
+  agents: z.array(z.string()),
+  /** Contiguous series, oldest first; the last entry is the current period. */
+  daily: z.array(periodSchema),
+  weekly: z.array(periodSchema),
+  monthly: z.array(periodSchema),
+  recentSessions: z.array(sessionSchema),
+  /** Set when the latest refresh failed and an older report is served instead. */
+  refreshError: z.string().nullable(),
+});
+
 export const usageReportRpc = defineRpc({
   name: "usage.report",
   input: z.object({}),
-  output: z.object({
-    /** When ccusage last produced this report, in epoch milliseconds. */
-    generatedAt: z.number(),
-    /** The daemon's local date, the same calendar ccusage groups by. */
-    today: z.string(),
-    timezone: z.string(),
-    /** Every agent seen in the report, heaviest first: a stable order for colors. */
-    agents: z.array(z.string()),
-    /** Contiguous series, oldest first; the last entry is the current period. */
-    daily: z.array(periodSchema),
-    weekly: z.array(periodSchema),
-    monthly: z.array(periodSchema),
-    recentSessions: z.array(sessionSchema),
-    /** Set when the latest refresh failed and an older report is served instead. */
-    refreshError: z.string().nullable(),
-  }),
+  output: usageReportSchema,
+});
+
+export const updatePricesRpc = defineRpc({
+  name: "usage.prices.update",
+  input: z.object({}),
+  output: usageReportSchema,
 });
 
 const sessionMatchSchema = z.discriminatedUnion("status", [

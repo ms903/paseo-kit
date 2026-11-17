@@ -16,6 +16,8 @@ import {
   type RawReport,
   type RawRow,
 } from "./ccusage";
+import { createReportPricer } from "./codex-prices";
+import { createPriceCatalog } from "./price-catalog";
 
 export type UsageReport = RpcOutput<typeof usageReportRpc>;
 
@@ -164,6 +166,7 @@ interface Snapshot {
 
 export interface ReportCache {
   read(): Promise<UsageReport>;
+  updatePrices(): Promise<UsageReport>;
   /** Every session ccusage knows, for matching Paseo agents. */
   sessions(): Promise<SessionUsage[]>;
   /** Marks the report stale and refreshes it soon if anyone is watching. */
@@ -174,6 +177,8 @@ export interface ReportCache {
 export function createReportCache(): ReportCache {
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
   const lifetime = new AbortController();
+  const priceCatalog = createPriceCatalog(lifetime.signal);
+  const applyPrices = createReportPricer();
   let snapshot: Snapshot | null = null;
   let fetchedAt = 0;
   let attemptedAt = 0;
@@ -184,13 +189,20 @@ export function createReportCache(): ReportCache {
   let inflight: Promise<Snapshot> | null = null;
   let lastReadAt = 0;
   let debounce: ReturnType<typeof setTimeout> | null = null;
+  let priceUpdate: Promise<UsageReport> | null = null;
 
   const refresh = (): Promise<Snapshot> => {
     inflight ??= (async () => {
       attemptedAt = Date.now();
       const seen = invalidations;
       try {
-        const [base, antigravity] = await Promise.all([runCcusage(timezone, lifetime.signal), antigravityReport(timezone, lifetime.signal)]);
+        const prices = priceCatalog.read();
+        const [base, antigravity, catalog] = await Promise.all([
+          runCcusage(timezone, lifetime.signal),
+          antigravityReport(timezone, lifetime.signal, undefined, prices),
+          prices,
+        ]);
+        await applyPrices(base, timezone, catalog, lifetime.signal);
         const raw = mergeAntigravity(base, antigravity);
         const next = {
           report: buildReport(raw, timezone, localToday(timezone)),
@@ -227,6 +239,17 @@ export function createReportCache(): ReportCache {
     async read() {
       const { report } = await current();
       return { ...report, refreshError };
+    },
+    updatePrices() {
+      priceUpdate ??= (async () => {
+        await priceCatalog.update();
+        // Let a report started with the previous prices finish before replacing it.
+        await inflight?.catch(() => undefined);
+        return (await refresh()).report;
+      })().finally(() => {
+        priceUpdate = null;
+      });
+      return priceUpdate;
     },
     async sessions() {
       return (await current()).sessions;

@@ -13,6 +13,7 @@ import {
   modelName,
   generationCost,
 } from "../plugins/ccusage-stats/server/antigravity-prices";
+import { parsePriceCatalog } from "../plugins/ccusage-stats/server/price-catalog";
 function vi(value: number): Buffer {
   const out: number[] = [];
   let v = BigInt(value);
@@ -147,7 +148,10 @@ test("prices Hydrogen for the base ID, Extra thinking, and the model label", asy
       { id: "gemini-flash-default", label: "Gemini 4 Hydrogen (Extra)" },
     ];
     for (const [index, { id, label }] of models.entries()) {
-      f.insert(index + 1, generation(99_900, 20_000, 50_000, seconds, id, label));
+      f.insert(
+        index + 1,
+        generation(99_900, 20_000, 50_000, seconds, id, label),
+      );
     }
 
     const report = await antigravityReport("UTC", undefined, f.root);
@@ -157,9 +161,34 @@ test("prices Hydrogen for the base ID, Extra thinking, and the model label", asy
       ["gemini-4-hydrogen"],
     );
     // 300k input, 60k output, and 150k cached tokens at the Standard rates.
-    for (const rows of [report.daily, report.weekly, report.monthly, report.session]) {
+    for (const rows of [
+      report.daily,
+      report.weekly,
+      report.monthly,
+      report.session,
+    ]) {
       assert.ok(Math.abs(rows[0].totalCost - 0.91125) < 1e-10);
     }
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("prices a new Antigravity model when the catalog publishes it", async () => {
+  const f = await fixture();
+  try {
+    const id = "gemini-9-fixture";
+    f.insert(1, generation(99_900, 1_000, 30_000, seconds, id, ""));
+    assert.equal((await antigravityReport("UTC", undefined, f.root)).daily[0].totalCost, 0);
+    const catalog = parsePriceCatalog({
+      google: { models: { [id]: { cost: {
+        input: 2, output: 4, cache_read: 0.2,
+        tiers: [{ input: 3, output: 7, cache_read: 0.3, tier: { type: "context", size: 128_000 } }],
+      } } } },
+    });
+    const updated = await antigravityReport("UTC", undefined, f.root, catalog);
+    assert.equal(updated.session[0].totalTokens, 131_000);
+    assert.ok(Math.abs(updated.daily[0].totalCost - 0.316) < 1e-10);
   } finally {
     await f.cleanup();
   }
@@ -216,35 +245,27 @@ test("resolves served model labels and official price boundaries", () => {
     "claude-sonnet-4-5",
   );
   assert.equal(
-    generationCost("claude-opus-4-6", 1e6, 1e6, 1e6, false, "2026-11-17"),
+    generationCost("claude-opus-4-6", 1e6, 1e6, 1e6, 0, "2026-11-17"),
     30.5,
   );
   assert.equal(
-    generationCost("gemini-4-carbon", 1e6, 1e6, 1e6, false, "2026-11-30"),
+    generationCost("gemini-4-carbon", 1e6, 1e6, 1e6, 0, "2026-11-30"),
     12.1,
   );
   assert.equal(
-    generationCost("gemini-4-carbon", 1e6, 1e6, 1e6, false, "2026-12-01"),
+    generationCost("gemini-4-carbon", 1e6, 1e6, 1e6, 0, "2026-12-01"),
     24.2,
   );
   assert.equal(
-    generationCost("gemini-3.8-flash", 1e6, 1e6, 1e6, false, "2026-12-31"),
+    generationCost("gemini-3.8-flash", 1e6, 1e6, 1e6, 0, "2026-12-31"),
     4.575,
   );
   assert.equal(
-    generationCost("gemini-3.8-flash", 1e6, 1e6, 1e6, false, "2027-01-01"),
+    generationCost("gemini-3.8-flash", 1e6, 1e6, 1e6, 0, "2027-01-01"),
     9.15,
   );
   assert.equal(
-    generationCost(
-      "claude-haiku-5-5",
-      100001,
-      100,
-      0,
-      false,
-      "2026-11-17",
-      true,
-    ),
+    generationCost("claude-haiku-5-5", 100001, 100, 0, 100001, "2026-11-17"),
     0.0502505,
   );
 });
