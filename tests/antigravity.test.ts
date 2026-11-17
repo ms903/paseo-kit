@@ -138,6 +138,33 @@ test("decodes step timestamps, skips corrupt and oversized protobuf rows, prices
   }
 });
 
+test("prices Hydrogen for the base ID, Extra thinking, and the model label", async () => {
+  const f = await fixture();
+  try {
+    const models = [
+      { id: "gemini-4-hydrogen", label: "" },
+      { id: "gemini-4-hydrogen-xhigh", label: "" },
+      { id: "gemini-flash-default", label: "Gemini 4 Hydrogen (Extra)" },
+    ];
+    for (const [index, { id, label }] of models.entries()) {
+      f.insert(index + 1, generation(99_900, 20_000, 50_000, seconds, id, label));
+    }
+
+    const report = await antigravityReport("UTC", undefined, f.root);
+    assert.equal(report.session[0].totalTokens, 510_000);
+    assert.deepEqual(
+      report.session[0].modelBreakdowns.map((model) => model.modelName),
+      ["gemini-4-hydrogen"],
+    );
+    // 300k input, 60k output, and 150k cached tokens at the Standard rates.
+    for (const rows of [report.daily, report.weekly, report.monthly, report.session]) {
+      assert.ok(Math.abs(rows[0].totalCost - 0.91125) < 1e-10);
+    }
+  } finally {
+    await f.cleanup();
+  }
+});
+
 test("deduplicates mirrored surfaces, excludes backups and replaces native ccusage Antigravity totals", async () => {
   const f = await fixture();
   try {

@@ -13,6 +13,7 @@ interface Price {
 export const ANTIGRAVITY_PRICES: Record<string, Price> = {
   "gemini-4-carbon": { base: [2, 10, 0.1], fromDecember2026: [4, 20, 0.2] },
   "gemini-4-argon": { base: [2, 10, 0.1], fromDecember2026: [4, 20, 0.2] },
+  "gemini-4-hydrogen": { base: [1.5, 7.5, 0.075] },
   "gemini-3.1-pro": { base: [2, 12, 0.2], long: [4, 18, 0.4] },
   "gemini-3-pro": { base: [2, 12, 0.2], long: [4, 18, 0.4] },
   "gemini-3-flash": { base: [0.5, 3, 0.05] },
@@ -53,11 +54,11 @@ export function modelName(modelId: string, label: string): string {
     .trim()
     .toLowerCase()
     .replace(/-tiered$/, "")
-    .replace(/-(minimal|low|medium|high|thinking)$/, "")
+    .replace(/-(minimal|low|medium|high|xhigh|thinking)$/, "")
     .replace(/-preview(?:-\d{2}-\d{2})?$/, "")
     .replace(/-\d{8}$/, "");
   const gemini =
-    /^Gemini\s+(\d+(?:\.\d+)*)\s+(Flash[ -]Lite|Pro|Flash|Ultra|Nano|Carbon|Argon)\b/i.exec(
+    /^Gemini\s+(\d+(?:\.\d+)*)\s+(Flash[ -]Lite|Pro|Flash|Ultra|Nano|Carbon|Argon|Hydrogen)\b/i.exec(
       label,
     );
   const claude =
