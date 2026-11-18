@@ -10,7 +10,17 @@ const shortMonth = new Intl.DateTimeFormat("en-US", { timeZone: "UTC", month: "s
 const longMonth = new Intl.DateTimeFormat("en-US", { timeZone: "UTC", month: "long", year: "numeric" });
 
 export function formatTokens(tokens: number): string {
-  return integer.format(Math.max(tokens, 0));
+  const value = Math.max(tokens, 0);
+  if (value < 999.5) return `${Math.round(value)}`;
+  let scaled = value;
+  for (const unit of ["K", "M", "B", "T"]) {
+    scaled /= 1000;
+    // Use the next unit when rounding would display 1000 of the current unit.
+    if (scaled < 9.995) return `${scaled.toFixed(2)}${unit}`;
+    if (scaled < 99.95) return `${scaled.toFixed(1)}${unit}`;
+    if (scaled < 999.5 || unit === "T") return `${Math.round(scaled)}${unit}`;
+  }
+  return "";
 }
 
 export function formatCost(cost: number): string {

@@ -9,8 +9,12 @@ import {
   reportTimeFormatter,
 } from "../plugins/ccusage-stats/client/format";
 
-test("formats complete token counts and USD amounts with fixed decimal precision", () => {
-  assert.equal(formatTokens(2_773_484_011), "2,773,484,011");
+test("abbreviates token counts and displays USD amounts in full", () => {
+  assert.equal(formatTokens(0), "0");
+  assert.equal(formatTokens(265_741), "266K");
+  assert.equal(formatTokens(999_500), "1.00M");
+  assert.equal(formatTokens(555_855_928), "556M");
+  assert.equal(formatTokens(2_773_484_011), "2.77B");
   assert.equal(formatCost(1_238.47), "$1,238.47");
   assert.equal(formatCost(118.26), "$118.26");
   assert.equal(formatCost(0), "$0.00");

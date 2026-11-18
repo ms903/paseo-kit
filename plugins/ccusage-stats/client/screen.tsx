@@ -131,7 +131,7 @@ function PeriodOverview({
         <View style={{ flexGrow: 1, flexBasis: 165, gap: 3 }}>
           <Text style={muted}>Cost</Text>
           <Text style={value}>{formatCost(usage.cost)}</Text>
-          <Text style={[muted, { fontSize: FONT.caption }]}>{formatCost(perMillion)} per 1,000,000 tokens</Text>
+          <Text style={[muted, { fontSize: FONT.caption }]}>{formatCost(perMillion)} per 1M tokens</Text>
         </View>
       </View>
     </>
