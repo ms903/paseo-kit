@@ -2,186 +2,189 @@ import type { PluginTheme } from "@getpaseo/plugin";
 import { useRpc, type PluginScreenProps } from "@getpaseo/plugin/client";
 import { Icon, useToast } from "@getpaseo/plugin/client/react-native";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState, type ReactNode } from "react";
-import { Pressable, ScrollView, Text, View, type PressableStateCallbackType } from "react-native";
-import { updatePricesRpc, type PeriodKind, type SessionUsage, type UsagePeriod } from "../shared/usage";
-import { Legend, PERIOD_OPTIONS, PeriodBars, Segmented, SwatchDot } from "./charts";
-import { agentSwatch, SESSION_USAGE_KEY, USAGE_REPORT_KEY, useUsageReport, type UsageReport } from "./data";
+import { useMemo, useState, type ReactNode } from "react";
 import {
-  agentLabel,
-  CURRENT_LABEL,
-  formatAgo,
-  formatCost,
-  formatPercent,
-  formatPeriodLong,
-  formatTokens,
-  shortSessionId,
+  Pressable, ScrollView, Text, View, type PressableStateCallbackType, type TextStyle, type ViewStyle,
+} from "react-native";
+import { updatePricesRpc, type PeriodKind, type UsagePeriod } from "../shared/usage";
+import { Legend, PERIOD_OPTIONS, PeriodBars, Segmented, SwatchDot } from "./charts";
+import {
+  agentSwatch, SESSION_USAGE_KEY, USAGE_REPORT_KEY, useUsageReport, type UsageReport,
+} from "./data";
+import {
+  agentLabel, formatCost, formatPercent, formatPeriodLong, formatPeriodRange, formatTokens,
+  reportTimeFormatter, shortSessionId,
 } from "./format";
-import { AgentList, Composition, FONT, Headline } from "./summary";
+import {
+  AgentList, Composition, FONT, TokenChange, UsageAmounts, UsageTableHeader, usageColumns,
+} from "./summary";
 
 type HoverState = PressableStateCallbackType & { hovered?: boolean };
 
-const MAX_CONTENT_WIDTH = 880;
+const MAX_CONTENT_WIDTH = 1_080;
 
-function Card({
+function Panel({
   theme,
   title,
-  trailing,
+  detail,
+  style,
   children,
 }: {
   theme: PluginTheme;
-  title: string;
-  trailing?: ReactNode;
+  title?: string;
+  detail?: string;
+  style?: ViewStyle;
   children: ReactNode;
 }) {
   return (
-    <View
-      style={{
-        gap: 12,
-        padding: 16,
-        borderRadius: 12,
-        borderWidth: 1,
-        borderColor: theme.colors.border,
-        backgroundColor: theme.colors.surface1,
-      }}
-    >
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-        <Text
-          style={{
-            flex: 1,
-            fontSize: FONT.title,
-            fontWeight: "600",
-            color: theme.colors.foreground,
-          }}
-        >
-          {title}
-        </Text>
-        {trailing}
-      </View>
+    <View style={[{
+      gap: 12, padding: 16, borderRadius: 12, borderWidth: 1,
+      borderColor: theme.colors.border, backgroundColor: theme.colors.surface1,
+    }, style]}>
+      {title ? (
+        <View style={{ flexDirection: "row", alignItems: "baseline", flexWrap: "wrap", gap: 6 }}>
+          <Text accessibilityRole="header" style={{ flexGrow: 1, fontSize: 15, fontWeight: "600", color: theme.colors.foreground }}>
+            {title}
+          </Text>
+          {detail ? <Text style={{ fontSize: FONT.caption, color: theme.colors.foregroundMuted }}>{detail}</Text> : null}
+        </View>
+      ) : null}
       {children}
     </View>
   );
 }
 
-function Stat({
+function PeriodOverview({
   theme,
-  label,
-  value,
-  detail,
+  kind,
+  today,
+  period,
+  previous,
+  selected,
+  count,
+  onSelect,
+  narrow,
 }: {
   theme: PluginTheme;
-  label: string;
-  value: string;
-  detail?: string;
+  kind: PeriodKind;
+  today: string;
+  period: UsagePeriod;
+  previous?: UsagePeriod;
+  selected: number;
+  count: number;
+  onSelect(index: number): void;
+  narrow: boolean;
 }) {
-  return (
-    <View style={{ flexGrow: 1, flexBasis: 120, gap: 2 }}>
-      <Text style={{ fontSize: FONT.caption, color: theme.colors.foregroundMuted }}>{label}</Text>
-      <Text
-        style={{
-          fontSize: 18,
-          fontWeight: "600",
-          color: theme.colors.foreground,
-          fontVariant: ["tabular-nums"],
-        }}
-      >
-        {value}
-      </Text>
-      {detail ? (
-        <Text style={{ fontSize: FONT.caption, color: theme.colors.foregroundMuted }}>
-          {detail}
-        </Text>
-      ) : null}
-    </View>
-  );
-}
-
-/** Cache reads are billed far below fresh input, so their share explains most of the cost. */
-function Stats({ theme, period }: { theme: PluginTheme; period: UsagePeriod }) {
   const { usage } = period;
-  const prompt = usage.inputTokens + usage.cacheCreationTokens + usage.cacheReadTokens;
   const perMillion = usage.totalTokens > 0 ? usage.cost / (usage.totalTokens / 1_000_000) : 0;
+  const muted = { fontSize: FONT.body, color: theme.colors.foregroundMuted };
+  const value: TextStyle = {
+    fontSize: narrow ? 28 : 36,
+    fontWeight: "600",
+    color: theme.colors.foreground,
+    fontVariant: ["tabular-nums"],
+  };
   return (
-    <View style={{ flexDirection: "row", flexWrap: "wrap", rowGap: 12, columnGap: 16 }}>
-      <Stat
-        theme={theme}
-        label="Cost"
-        value={formatCost(usage.cost)}
-        detail={`${formatCost(perMillion)} per 1M tokens`}
-      />
-      <Stat
-        theme={theme}
-        label="Cache hit rate"
-        value={prompt > 0 ? formatPercent(usage.cacheReadTokens / prompt) : "—"}
-        detail="of prompt tokens read from cache"
-      />
-      <Stat
-        theme={theme}
-        label="Output"
-        value={formatTokens(usage.outputTokens)}
-        detail="tokens generated"
-      />
-      <Stat
-        theme={theme}
-        label="Agents"
-        value={`${period.agents.length}`}
-        detail={`${new Set(period.agents.flatMap((a) => a.models.map((m) => m.model))).size} models`}
-      />
-    </View>
+    <>
+      <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 10 }}>
+        <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
+          <Text accessibilityRole="header" style={{
+            fontSize: narrow ? 21 : 25, fontWeight: "600", color: theme.colors.foreground,
+          }}>
+            {formatPeriodLong(kind, period.period, today)}
+          </Text>
+          {kind === "monthly" ? <Text style={muted}>{formatPeriodRange(kind, period.period, today)}</Text> : null}
+        </View>
+        <View style={{ flexDirection: "row", gap: 4 }}>
+          {[
+            { label: "Previous period", icon: "ChevronLeft", index: selected - 1 },
+            { label: "Next period", icon: "ChevronRight", index: selected + 1 },
+          ].map(({ label, icon, index }) => {
+            const disabled = index < 0 || index >= count;
+            return (
+              <Pressable
+                key={label}
+                accessibilityRole="button"
+                accessibilityLabel={label}
+                accessibilityState={{ disabled }}
+                disabled={disabled}
+                onPress={() => onSelect(index)}
+                style={({ hovered, pressed }: HoverState) => ({
+                  minWidth: 34, minHeight: 34, alignItems: "center", justifyContent: "center",
+                  borderRadius: 7, borderWidth: 1, borderColor: theme.colors.border,
+                  backgroundColor: hovered || pressed ? theme.colors.surface2 : theme.colors.surface0,
+                  opacity: disabled ? 0.4 : 1,
+                })}
+              >
+                <Icon name={icon} size={16} color={theme.colors.foreground} />
+              </Pressable>
+            );
+          })}
+        </View>
+      </View>
+      <View style={{ flexDirection: "row", flexWrap: "wrap", rowGap: 12, columnGap: 28 }}>
+        <View style={{ flexGrow: 1, flexBasis: narrow ? 240 : 350, gap: 3 }}>
+          <Text style={muted}>Total tokens</Text>
+          <Text style={value}>{formatTokens(usage.totalTokens)}</Text>
+          <TokenChange theme={theme} kind={kind} current={usage.totalTokens} previous={previous} />
+        </View>
+        <View style={{ flexGrow: 1, flexBasis: 165, gap: 3 }}>
+          <Text style={muted}>Cost</Text>
+          <Text style={value}>{formatCost(usage.cost)}</Text>
+          <Text style={[muted, { fontSize: FONT.caption }]}>{formatCost(perMillion)} per 1,000,000 tokens</Text>
+        </View>
+      </View>
+    </>
   );
 }
 
-function SessionRow({
+function RecentSessions({
   theme,
-  order,
-  session,
+  report,
+  clock,
+  narrow,
 }: {
   theme: PluginTheme;
-  order: readonly string[];
-  session: SessionUsage;
+  report: UsageReport;
+  clock: Intl.DateTimeFormat;
+  narrow: boolean;
 }) {
-  const topModel = session.models[0]?.model;
+  const { agents, recentSessions } = report;
+  const columns = narrow ? undefined : usageColumns(recentSessions.map((session) => session.usage));
   return (
-    <View style={{ flexDirection: "row", alignItems: "center", gap: 8, minHeight: 32 }}>
-      <SwatchDot swatch={agentSwatch(theme, order, session.agent)} />
-      <View style={{ flex: 1, minWidth: 0 }}>
-        <Text numberOfLines={1} style={{ fontSize: FONT.body, color: theme.colors.foreground }}>
-          {agentLabel(session.agent)}
-          <Text style={{ color: theme.colors.foregroundMuted, fontVariant: ["tabular-nums"] }}>
-            {"  "}
-            {shortSessionId(session.id)}
-          </Text>
-        </Text>
-        <Text
-          numberOfLines={1}
-          style={{ fontSize: FONT.caption, color: theme.colors.foregroundMuted }}
-        >
-          {[topModel, session.lastActivity ? formatAgo(Date.parse(session.lastActivity)) : null]
-            .filter(Boolean)
-            .join(" · ")}
-        </Text>
-      </View>
-      <Text
-        style={{
-          fontSize: FONT.body,
-          color: theme.colors.foreground,
-          fontVariant: ["tabular-nums"],
-        }}
-      >
-        {formatTokens(session.usage.totalTokens)}
-      </Text>
-      <Text
-        style={{
-          width: 52,
-          textAlign: "right",
-          fontSize: FONT.body,
-          color: theme.colors.foregroundMuted,
-          fontVariant: ["tabular-nums"],
-        }}
-      >
-        {formatCost(session.usage.cost)}
-      </Text>
-    </View>
+    <Panel theme={theme} title="Recent sessions">
+      {recentSessions.length === 0 ? (
+        <Text style={{ fontSize: FONT.body, color: theme.colors.foregroundMuted }}>No sessions yet.</Text>
+      ) : (
+        <View>
+          <UsageTableHeader theme={theme} label="Session" columns={columns} />
+          {recentSessions.map((session, index) => {
+            const lastActivity = Date.parse(session.lastActivity ?? "");
+            const date = Number.isFinite(lastActivity) ? clock.format(lastActivity) : null;
+            return (
+              <View key={`${session.agent}:${session.id}`} style={{
+                flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 8,
+                borderTopWidth: index > 0 ? 1 : 0, borderTopColor: theme.colors.border,
+              }}>
+                <SwatchDot swatch={agentSwatch(theme, agents, session.agent)} />
+                <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+                  <Text style={{ fontSize: FONT.body, color: theme.colors.foreground }}>
+                    {agentLabel(session.agent)}
+                    <Text style={{ color: theme.colors.foregroundMuted, fontVariant: ["tabular-nums"] }}>
+                      {`  ${shortSessionId(session.id)}`}
+                    </Text>
+                  </Text>
+                  <Text style={{ fontSize: FONT.caption, color: theme.colors.foregroundMuted }}>
+                    {[session.models[0]?.model, date].filter(Boolean).join(" · ")}
+                  </Text>
+                </View>
+                <UsageAmounts theme={theme} usage={session.usage} columns={columns} />
+              </View>
+            );
+          })}
+        </View>
+      )}
+    </Panel>
   );
 }
 
@@ -189,206 +192,210 @@ function Body({
   theme,
   compact,
   report,
+  priceAction,
+  initialKind,
+  initialPeriod,
 }: {
   theme: PluginTheme;
   compact: boolean;
   report: UsageReport;
+  priceAction: ReactNode;
+  initialKind: PeriodKind;
+  initialPeriod?: string;
 }) {
-  const [kind, setKind] = useState<PeriodKind>("daily");
-  const [picked, setPicked] = useState<number | null>(null);
-  const all = report[kind];
-  // A phone shows half the columns so each stays wide enough to press.
-  const periods = compact ? all.slice(-Math.ceil(all.length / 2)) : all;
-  const selected = picked !== null && picked < periods.length ? picked : periods.length - 1;
+  const [kind, setKind] = useState(initialKind);
+  const [pickedKey, setPickedKey] = useState<string | null>(initialPeriod ?? null);
+  const [width, setWidth] = useState(0);
+  const { today, timezone } = report;
+  const periods = report[kind];
+  const picked = periods.findIndex(({ period }) => period === pickedKey);
+  const selected = picked < 0 ? periods.length - 1 : picked;
   const period = periods[selected];
-  const changeKind = (next: PeriodKind) => {
-    setKind(next);
-    setPicked(null);
+  const narrow = compact || (width > 0 && width < 610);
+  const split = !compact && width >= 740;
+  const clock = useMemo(() => reportTimeFormatter(timezone), [timezone]);
+  const select = (index: number) => {
+    setPickedKey(index === periods.length - 1 ? null : periods[index]?.period ?? null);
   };
-  const periodTitle = period
-    ? selected === periods.length - 1
-      ? CURRENT_LABEL[kind]
-      : formatPeriodLong(kind, period.period)
-    : "";
+  const changeKind = (next: PeriodKind) => {
+    if (kind !== next) {
+      setKind(next);
+      setPickedKey(null);
+    }
+  };
+  const prompt = period
+    ? period.usage.inputTokens + period.usage.cacheCreationTokens + period.usage.cacheReadTokens
+    : 0;
+  const cacheHit = period && prompt > 0 ? formatPercent(period.usage.cacheReadTokens / prompt) : "—";
+  const modelCount = period ? new Set(period.agents.flatMap((agent) => agent.models.map((model) => model.model))).size : 0;
+  const columnStyle: ViewStyle | undefined = split ? { flex: 1, minWidth: 0 } : undefined;
+  const updated = (
+    <Text style={{ fontSize: FONT.caption, color: theme.colors.foregroundMuted }}>
+      Updated {clock.format(report.generatedAt)} · {timezone}
+    </Text>
+  );
 
   return (
-    <View style={{ gap: compact ? 12 : 16 }}>
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-        <Segmented
-          theme={theme}
-          options={PERIOD_OPTIONS}
-          value={kind}
-          onChange={changeKind}
-          accessibilityLabel="Period"
-        />
-        <Text
-          style={{
-            flex: 1,
-            fontSize: FONT.caption,
-            color: theme.colors.foregroundMuted,
-            textAlign: "right",
-          }}
-        >
-          Updated {formatAgo(report.generatedAt)} · {report.timezone}
-        </Text>
+    <View onLayout={(event) => setWidth(event.nativeEvent.layout.width)} style={{ gap: 14 }}>
+      <View style={{ flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+        <Segmented theme={theme} options={PERIOD_OPTIONS} value={kind} onChange={changeKind} accessibilityLabel="Period" />
+        <View style={{ flex: 1 }} />
+        {narrow ? null : updated}
+        {priceAction}
       </View>
+      {narrow ? updated : null}
       {report.refreshError ? (
         <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
           <Icon name="TriangleAlert" size={14} color={theme.colors.statusWarning} />
           <Text style={{ flex: 1, fontSize: FONT.body, color: theme.colors.statusWarning }}>
-            Showing older numbers: {report.refreshError}
+            Could not refresh usage. {report.refreshError}
           </Text>
         </View>
       ) : null}
 
-      <Card theme={theme} title="Tokens">
-        <Headline
-          theme={theme}
-          kind={kind}
-          periods={periods}
-          index={selected}
-          heroSize={compact ? 26 : 30}
-        />
-        <PeriodBars
-          theme={theme}
-          kind={kind}
-          periods={periods}
-          order={report.agents}
-          selected={selected}
-          onSelect={setPicked}
-          height={compact ? 110 : 150}
-          labelEvery={kind === "daily" ? 7 : kind === "weekly" ? 2 : compact ? 2 : 1}
-        />
-        <Legend theme={theme} order={report.agents} periods={periods} />
-      </Card>
-
       {period ? (
         <>
-          <Card theme={theme} title={periodTitle}>
-            <Stats theme={theme} period={period} />
-            <Composition theme={theme} usage={period.usage} />
-          </Card>
-          <Card
-            theme={theme}
-            title="By agent"
-            trailing={
-              <Text style={{ fontSize: FONT.caption, color: theme.colors.foregroundMuted }}>
-                Press an agent for its models
-              </Text>
-            }
-          >
-            <AgentList theme={theme} order={report.agents} period={period} expandable />
-          </Card>
+          <Panel theme={theme}>
+            <PeriodOverview
+              theme={theme}
+              kind={kind}
+              today={today}
+              period={period}
+              previous={periods[selected - 1]}
+              selected={selected}
+              count={periods.length}
+              onSelect={select}
+              narrow={narrow}
+            />
+            <View style={{
+              gap: 10, marginTop: 2, paddingTop: 12,
+              borderTopWidth: 1, borderTopColor: theme.colors.border,
+            }}>
+              <Text style={{ fontSize: FONT.body, fontWeight: "600", color: theme.colors.foreground }}>Token history</Text>
+              <PeriodBars
+                theme={theme}
+                kind={kind}
+                periods={periods}
+                order={report.agents}
+                selected={selected}
+                onSelect={select}
+                height={narrow ? 108 : 150}
+                labelEvery={kind === "daily" ? 5 : 1}
+                today={today}
+                showScale={width >= 480}
+              />
+              <Legend theme={theme} order={report.agents} periods={periods} />
+            </View>
+          </Panel>
+
+          <View style={{ flexDirection: split ? "row" : "column", alignItems: split ? "flex-start" : "stretch", gap: 14 }}>
+            <Panel theme={theme} title="Token breakdown" detail={`Cache hit rate ${cacheHit}`} style={columnStyle}>
+              <Composition theme={theme} usage={period.usage} />
+            </Panel>
+            <Panel
+              theme={theme}
+              title="By agent"
+              detail={`${period.agents.length} ${period.agents.length === 1 ? "agent" : "agents"} · ${modelCount} ${modelCount === 1 ? "model" : "models"}`}
+              style={columnStyle}
+            >
+              <AgentList theme={theme} order={report.agents} period={period} expandable compact={narrow} />
+            </Panel>
+          </View>
         </>
       ) : null}
 
-      <Card theme={theme} title="Recent sessions">
-        {report.recentSessions.length === 0 ? (
-          <Text style={{ fontSize: FONT.body, color: theme.colors.foregroundMuted }}>
-            No sessions yet.
-          </Text>
-        ) : (
-          <View>
-            {report.recentSessions.map((session) => (
-              <SessionRow
-                key={`${session.agent}:${session.id}`}
-                theme={theme}
-                order={report.agents}
-                session={session}
-              />
-            ))}
-          </View>
-        )}
-      </Card>
-
-
+      <RecentSessions theme={theme} report={report} clock={clock} narrow={narrow} />
     </View>
   );
 }
 
-export function UsageScreen({ theme, layout }: PluginScreenProps) {
-  const { data, error, isPending, refetch, isRefetching } = useUsageReport();
+export function UsageScreen({ theme, host, layout, params }: PluginScreenProps) {
+  const { data, error, isPending, refetch, isRefetching } = useUsageReport(host.id);
   const updatePrices = useRpc(updatePricesRpc);
   const queryClient = useQueryClient();
   const toast = useToast();
+  const initialKind = PERIOD_OPTIONS.find(({ value }) => value === params.kind)?.value ?? "daily";
   const priceUpdate = useMutation({
-    mutationFn: () => updatePrices({}),
+    mutationFn: (_hostId: string) => updatePrices({}),
     retry: false,
-    onSuccess: async (report) => {
-      await queryClient.cancelQueries({ queryKey: USAGE_REPORT_KEY });
-      queryClient.setQueryData(USAGE_REPORT_KEY, report);
-      void queryClient.invalidateQueries({ queryKey: SESSION_USAGE_KEY });
+    onSuccess: async (report, hostId) => {
+      const queryKey = [...USAGE_REPORT_KEY, hostId];
+      await queryClient.cancelQueries({ queryKey });
+      queryClient.setQueryData(queryKey, report);
+      void queryClient.invalidateQueries({ queryKey: [...SESSION_USAGE_KEY, hostId] });
     },
     onError: () => toast.error("Could not update prices"),
   });
-  const padding = layout.compact ? 16 : 24;
+  const priceAction = (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityState={{ busy: priceUpdate.isPending, disabled: priceUpdate.isPending }}
+      disabled={priceUpdate.isPending}
+      onPress={() => priceUpdate.mutate(host.id)}
+      style={({ hovered, pressed }: HoverState) => ({
+        alignSelf: "flex-end", flexDirection: "row", alignItems: "center", gap: 6,
+        minHeight: 34, paddingHorizontal: 10, borderRadius: 7,
+        borderWidth: 1, borderColor: theme.colors.border,
+        backgroundColor: hovered || pressed ? theme.colors.surface2 : theme.colors.surface1,
+      })}
+    >
+      <Icon name="RefreshCw" size={14} color={theme.colors.foregroundMuted} />
+      <Text style={{ fontSize: FONT.body, color: theme.colors.foreground }}>
+        {priceUpdate.isPending ? "Updating prices…" : "Update prices"}
+      </Text>
+    </Pressable>
+  );
   return (
     <ScrollView
       style={{ flex: 1, backgroundColor: theme.colors.surface0 }}
-      contentContainerStyle={{ padding, alignItems: "center" }}
+      contentContainerStyle={{ padding: layout.compact ? 12 : 24, alignItems: "center" }}
     >
       <View style={{ width: "100%", maxWidth: MAX_CONTENT_WIDTH, gap: 12 }}>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityState={{ busy: priceUpdate.isPending, disabled: priceUpdate.isPending }}
-          disabled={priceUpdate.isPending}
-          onPress={() => priceUpdate.mutate()}
-          style={({ hovered }: HoverState) => ({
-            alignSelf: "flex-end", flexDirection: "row", alignItems: "center", gap: 6,
-            paddingVertical: 6, paddingHorizontal: 12, borderRadius: 8,
-            borderWidth: 1, borderColor: theme.colors.border,
-            backgroundColor: hovered ? theme.colors.surface2 : theme.colors.surface1,
-          })}
-        >
-          <Icon name="RefreshCw" size={14} color={theme.colors.foregroundMuted} />
-          <Text style={{ fontSize: FONT.body, color: theme.colors.foreground }}>
-            {priceUpdate.isPending ? "Updating prices…" : "Update prices"}
-          </Text>
-        </Pressable>
         {data ? (
-          <Body theme={theme} compact={layout.compact} report={data} />
+          <Body
+            key={`${host.id}:${initialKind}:${params.period ?? ""}`}
+            theme={theme}
+            compact={layout.compact}
+            report={data}
+            priceAction={priceAction}
+            initialKind={initialKind}
+            initialPeriod={params.period}
+          />
         ) : (
-          <View style={{ gap: 12, paddingVertical: 48, alignItems: "center" }}>
-            <Icon
-              name={isPending ? "Hourglass" : "CircleAlert"}
-              size={20}
-              color={isPending ? theme.colors.foregroundMuted : theme.colors.statusDanger}
-            />
-            <Text
-              style={{ fontSize: FONT.title, color: theme.colors.foreground, textAlign: "center" }}
-            >
-              {isPending ? "Reading usage logs..." : "Could not read usage"}
-            </Text>
-            {error ? (
-              <Text
-                style={{
-                  fontSize: FONT.body,
-                  color: theme.colors.foregroundMuted,
-                  textAlign: "center",
-                }}
-              >
-                {error.message}
+          <>
+            {priceAction}
+            <View style={{ gap: 12, paddingVertical: 48, alignItems: "center" }}>
+              <Icon
+                name={isPending ? "Hourglass" : "CircleAlert"}
+                size={20}
+                color={isPending ? theme.colors.foregroundMuted : theme.colors.statusDanger}
+              />
+              <Text style={{ fontSize: FONT.title, color: theme.colors.foreground, textAlign: "center" }}>
+                {isPending ? "Reading usage logs…" : "Could not read usage"}
               </Text>
-            ) : null}
-            {!isPending ? (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Try again"
-                disabled={isRefetching}
-                onPress={() => void refetch()}
-                style={({ hovered }: HoverState) => ({
-                  paddingVertical: 6,
-                  paddingHorizontal: 12,
-                  borderRadius: 8,
-                  backgroundColor: hovered ? theme.colors.surface1 : theme.colors.surface2,
-                })}
-              >
-                <Text style={{ fontSize: FONT.body, color: theme.colors.foreground }}>
-                  {isRefetching ? "Trying..." : "Try again"}
+              {error ? (
+                <Text style={{ fontSize: FONT.body, color: theme.colors.foregroundMuted, textAlign: "center" }}>
+                  {error.message}
                 </Text>
-              </Pressable>
-            ) : null}
-          </View>
+              ) : null}
+              {!isPending ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Try again"
+                  disabled={isRefetching}
+                  onPress={() => void refetch()}
+                  style={({ hovered }: HoverState) => ({
+                    paddingVertical: 6, paddingHorizontal: 12, borderRadius: 8,
+                    backgroundColor: hovered ? theme.colors.surface1 : theme.colors.surface2,
+                  })}
+                >
+                  <Text style={{ fontSize: FONT.body, color: theme.colors.foreground }}>
+                    {isRefetching ? "Trying…" : "Try again"}
+                  </Text>
+                </Pressable>
+              ) : null}
+            </View>
+          </>
         )}
       </View>
     </ScrollView>

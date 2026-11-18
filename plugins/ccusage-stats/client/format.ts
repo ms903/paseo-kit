@@ -1,72 +1,68 @@
 import type { PeriodKind } from "../shared/usage";
 
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const integer = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
+const usd = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
+const shortDay = new Intl.DateTimeFormat("en-US", { timeZone: "UTC", month: "short", day: "numeric" });
+const longDay = new Intl.DateTimeFormat("en-US", {
+  timeZone: "UTC", month: "long", day: "numeric", year: "numeric",
+});
+const shortMonth = new Intl.DateTimeFormat("en-US", { timeZone: "UTC", month: "short" });
+const longMonth = new Intl.DateTimeFormat("en-US", { timeZone: "UTC", month: "long", year: "numeric" });
 
-/** "999", "345K", "28.0M", "1.26B": three significant digits, never more than five characters. */
 export function formatTokens(tokens: number): string {
-  const value = Math.max(tokens, 0);
-  if (value < 999.5) return `${Math.round(value)}`;
-  let scaled = value;
-  for (const unit of ["K", "M", "B", "T"]) {
-    scaled /= 1000;
-    // Thresholds sit below the rounding points: 9.996 would print as "10.00", 999.6 as "1000".
-    if (scaled < 9.995) return `${scaled.toFixed(2)}${unit}`;
-    if (scaled < 99.95) return `${scaled.toFixed(1)}${unit}`;
-    if (scaled < 999.5 || unit === "T") return `${Math.round(scaled)}${unit}`;
-  }
-  return "";
+  return integer.format(Math.max(tokens, 0));
 }
 
-/** "$0.42", "$12.30", "$118", "$1.2K". */
 export function formatCost(cost: number): string {
   const value = Math.max(cost, 0);
-  if (value === 0) return "$0";
-  if (value < 0.005) return "<$0.01";
-  if (value < 99.995) return `$${value.toFixed(2)}`;
-  if (value < 999.5) return `$${Math.round(value)}`;
-  return `$${(value / 1000).toFixed(1)}K`;
+  return value > 0 && value < 0.005 ? "<$0.01" : usd.format(value);
 }
 
 export function formatPercent(fraction: number): string {
   const percent = fraction * 100;
   if (percent > 0 && percent < 1) return "<1%";
-  return `${Math.round(percent)}%`;
+  return `${integer.format(percent)}%`;
 }
 
-function parseKey(key: string): { year: number; month: number; day: number } {
+// The report's keys already use the daemon's calendar. UTC keeps browser and host dates aligned.
+function dateOf(key: string): Date {
   const [year = 1970, month = 1, day = 1] = key.split("-").map(Number);
-  return { year, month, day };
+  return new Date(Date.UTC(year, month - 1, day));
 }
 
-/** Axis labels: "12", "Oct 5", "Oct". */
 export function formatPeriodShort(kind: PeriodKind, key: string): string {
-  const { month, day } = parseKey(key);
-  if (kind === "monthly") return MONTHS[month - 1] ?? key;
-  if (kind === "weekly") return `${MONTHS[month - 1]} ${day}`;
-  return `${day}`;
+  const date = dateOf(key);
+  return kind === "monthly"
+    ? `${shortMonth.format(date)} ’${key.slice(2, 4)}`
+    : shortDay.format(date);
 }
 
-/** Headline labels: "Mon, Oct 12", "Week of Oct 5", "October 2026". */
-export function formatPeriodLong(kind: PeriodKind, key: string): string {
-  const { year, month, day } = parseKey(key);
-  if (kind === "monthly") return `${MONTHS[month - 1]} ${year}`;
-  if (kind === "weekly") return `Week of ${MONTHS[month - 1]} ${day}`;
-  const weekday = WEEKDAYS[new Date(Date.UTC(year, month - 1, day)).getUTCDay()];
-  return `${weekday}, ${MONTHS[month - 1]} ${day}`;
+export function formatPeriodRange(kind: PeriodKind, key: string, through?: string): string {
+  const start = dateOf(key);
+  if (kind === "daily") return longDay.format(start);
+  const year = start.getUTCFullYear();
+  const month = start.getUTCMonth();
+  const end = kind === "monthly"
+    ? new Date(Date.UTC(year, month + 1, 0))
+    : new Date(Date.UTC(year, month, start.getUTCDate() + 6));
+  const reportDay = through ? dateOf(through) : end;
+  const last = reportDay >= start && reportDay < end ? reportDay : end;
+  if (last.valueOf() === start.valueOf()) return longDay.format(start);
+  if (last.getUTCFullYear() !== year) return `${longDay.format(start)} – ${longDay.format(last)}`;
+  if (last.getUTCMonth() !== month) return `${shortDay.format(start)} – ${shortDay.format(last)}, ${year}`;
+  return `${shortDay.format(start)}–${last.getUTCDate()}, ${year}`;
 }
 
-export const CURRENT_LABEL: Record<PeriodKind, string> = {
-  daily: "Today",
-  weekly: "This week",
-  monthly: "This month",
-};
+export function formatPeriodLong(kind: PeriodKind, key: string, through?: string): string {
+  return kind === "monthly" ? longMonth.format(dateOf(key)) : formatPeriodRange(kind, key, through);
+}
 
-export const PREVIOUS_LABEL: Record<PeriodKind, string> = {
-  daily: "yesterday",
-  weekly: "last week",
-  monthly: "last month",
-};
+export function reportTimeFormatter(timeZone: string) {
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone, month: "short", day: "numeric", year: "numeric",
+    hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+  });
+}
 
 export function formatAgo(timestamp: number, now = Date.now()): string {
   const seconds = Math.max(0, Math.round((now - timestamp) / 1000));

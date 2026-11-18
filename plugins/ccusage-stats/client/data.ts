@@ -19,20 +19,20 @@ export const SESSION_USAGE_KEY = ["session-usage"] as const;
 
 export type UsageReport = RpcOutput<typeof usageReportRpc>;
 
-export function useUsageReport() {
+export function useUsageReport(hostId: string) {
   const getReport = useRpc(usageReportRpc);
   return useQuery({
-    queryKey: USAGE_REPORT_KEY,
+    queryKey: [...USAGE_REPORT_KEY, hostId],
     queryFn: () => getReport({}),
     refetchInterval: REPORT_REFRESH_MS,
     staleTime: REPORT_REFRESH_MS / 2,
   });
 }
 
-export function useSessionUsage(agentId: string) {
+export function useSessionUsage(hostId: string, agentId: string) {
   const getSessions = useRpc(sessionUsageRpc);
   return useQuery({
-    queryKey: [...SESSION_USAGE_KEY, agentId],
+    queryKey: [...SESSION_USAGE_KEY, hostId, agentId],
     queryFn: async () => {
       const { sessions } = await getSessions({ agentIds: [agentId] });
       return sessions[0] ?? { status: "unknown" as const, agentId };

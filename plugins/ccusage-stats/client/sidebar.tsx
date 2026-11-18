@@ -26,9 +26,7 @@ const ICON_SIZE = 14;
 const ICON_GAP = 6;
 const TEXT_GAP = 8;
 const MIN_METER_WIDTH = 24;
-// Below these widths the meter, then the cost, drop out. Estimated from 12px tabular digits.
-const WIDTH_FOR_COST = 120;
-const WIDTH_FOR_METER = 170;
+const DIGIT_WIDTH = 8;
 // Columns shown in the popover for each period kind.
 const POPOVER_PERIODS: Record<PeriodKind, number> = { daily: 14, weekly: 8, monthly: 6 };
 
@@ -52,8 +50,8 @@ function todayOf(report: UsageReport) {
   return report.daily[report.daily.length - 1];
 }
 
-export function UsageSidebarItem({ theme, openPopover }: PluginSidebarItemProps) {
-  const { data, error } = useUsageReport();
+export function UsageSidebarItem({ theme, host, openPopover }: PluginSidebarItemProps) {
+  const { data, error } = useUsageReport(host.id);
   const [available, setAvailable] = useState<number | null>(null);
   const onLayout = useCallback(
     (event: LayoutChangeEvent) => setAvailable(event.nativeEvent.layout.width),
@@ -64,13 +62,18 @@ export function UsageSidebarItem({ theme, openPopover }: PluginSidebarItemProps)
   if (!data && !error) return null;
   const today = data ? todayOf(data) : undefined;
   const typical = data ? typicalDay(data.daily) : null;
-  const width = available ?? WIDTH_FOR_COST;
+  const tokens = formatTokens(today?.usage.totalTokens ?? 0);
+  const cost = formatCost(today?.usage.cost ?? 0);
+  const labelWidth = ICON_SIZE + ICON_GAP + tokens.length * DIGIT_WIDTH;
+  const costWidth = labelWidth + TEXT_GAP + cost.length * DIGIT_WIDTH;
+  const meterWidth = costWidth + MIN_METER_WIDTH + TEXT_GAP;
+  const width = available ?? meterWidth;
   const pace =
     today && typical && !typical.estimated
       ? `, ${formatPercent(today.usage.cost / typical.cost)} of a typical day`
       : "";
   const label = today
-    ? `Token usage today: ${formatTokens(today.usage.totalTokens)} tokens${pace}, ${formatCost(today.usage.cost)}`
+    ? `Token usage today: ${tokens} tokens${pace}, ${cost}`
     : "Token usage unavailable";
 
   return (
@@ -93,18 +96,15 @@ export function UsageSidebarItem({ theme, openPopover }: PluginSidebarItemProps)
         <Icon name="Coins" size={ICON_SIZE} color={theme.colors.foregroundMuted} />
         {today && data && typical ? (
           <>
-            <Text
-              numberOfLines={1}
-              style={{
-                marginLeft: ICON_GAP,
-                fontSize: FONT.body,
-                color: theme.colors.foreground,
-                fontVariant: ["tabular-nums"],
-              }}
-            >
-              {formatTokens(today.usage.totalTokens)}
-            </Text>
-            {width >= WIDTH_FOR_METER ? (
+            {width >= labelWidth ? (
+              <Text style={{
+                marginLeft: ICON_GAP, fontSize: FONT.body,
+                color: theme.colors.foreground, fontVariant: ["tabular-nums"],
+              }}>
+                {tokens}
+              </Text>
+            ) : null}
+            {width >= meterWidth ? (
               <View style={{ flex: 1, minWidth: MIN_METER_WIDTH, marginLeft: TEXT_GAP }}>
                 <PaceBar
                   theme={theme}
@@ -116,7 +116,7 @@ export function UsageSidebarItem({ theme, openPopover }: PluginSidebarItemProps)
             ) : (
               <View style={{ flex: 1 }} />
             )}
-            {width >= WIDTH_FOR_COST ? (
+            {width >= costWidth ? (
               <Text
                 numberOfLines={1}
                 style={{
@@ -126,7 +126,7 @@ export function UsageSidebarItem({ theme, openPopover }: PluginSidebarItemProps)
                   fontVariant: ["tabular-nums"],
                 }}
               >
-                {formatCost(today.usage.cost)}
+                {cost}
               </Text>
             ) : null}
           </>
@@ -147,10 +147,10 @@ export function UsageSidebarItem({ theme, openPopover }: PluginSidebarItemProps)
   );
 }
 
-export function UsagePopover({ theme, layout, openScreen }: PluginPopoverProps) {
-  const { data, error, isPending } = useUsageReport();
+export function UsagePopover({ theme, host, layout, openScreen }: PluginPopoverProps) {
+  const { data, error, isPending } = useUsageReport(host.id);
   const [kind, setKind] = useState<PeriodKind>("daily");
-  const [picked, setPicked] = useState<number | null>(null);
+  const [pickedKey, setPickedKey] = useState<string | null>(null);
   const rootStyle = {
     gap: 12,
     padding: layout.compact ? 16 : 12,
@@ -176,10 +176,11 @@ export function UsagePopover({ theme, layout, openScreen }: PluginPopoverProps) 
 
   const periods = data[kind].slice(-POPOVER_PERIODS[kind]);
   const typical = typicalDay(data.daily);
-  const selected = picked !== null && picked < periods.length ? picked : periods.length - 1;
+  const picked = periods.findIndex(({ period }) => period === pickedKey);
+  const selected = picked < 0 ? periods.length - 1 : picked;
   const changeKind = (next: PeriodKind) => {
     setKind(next);
-    setPicked(null);
+    setPickedKey(null);
   };
 
   return (
@@ -196,7 +197,7 @@ export function UsagePopover({ theme, layout, openScreen }: PluginPopoverProps) 
           accessibilityLabel="Period"
         />
       </View>
-      <Headline theme={theme} kind={kind} periods={periods} index={selected} heroSize={22} />
+      <Headline theme={theme} kind={kind} periods={periods} index={selected} today={data.today} />
       {kind === "daily" ? (
         <View style={{ gap: 2 }}>
           {typicalCaption(typical).map((line) => (
@@ -212,14 +213,18 @@ export function UsagePopover({ theme, layout, openScreen }: PluginPopoverProps) 
         periods={periods}
         order={data.agents}
         selected={selected}
-        onSelect={setPicked}
+        onSelect={(index) => setPickedKey(index === periods.length - 1 ? null : periods[index]?.period ?? null)}
         height={52}
         labelEvery={kind === "daily" ? 7 : kind === "weekly" ? 4 : 3}
+        today={data.today}
       />
       <Legend theme={theme} order={data.agents} periods={periods} />
       <View style={{ height: 1, backgroundColor: theme.colors.border }} />
       <AgentList theme={theme} order={data.agents} period={periods[selected]} />
-      <Footer theme={theme} report={data} onMore={() => openScreen({ screenId: "usage" })} />
+      <Footer theme={theme} report={data} onMore={() => openScreen({
+        screenId: "usage",
+        params: pickedKey ? { kind, period: pickedKey } : { kind },
+      })} />
     </View>
   );
 }

@@ -8,16 +8,16 @@ import { Text, View } from "react-native";
 import { sessionUsageRpc, type SessionMatch } from "../shared/usage";
 import { useSessionUsage } from "./data";
 import { agentLabel, formatAgo, formatCost, formatTokens, shortSessionId } from "./format";
-import { Composition, FONT } from "./summary";
+import { Composition, FONT, UsageAmounts } from "./summary";
 
 const PILL_ID = "session-usage";
 const PILL_REFRESH_MS = 60_000;
 // The daemon refreshes its report a few seconds after a turn ends; ask after that.
 const AFTER_TURN_DELAY_MS = 8_000;
 
-function SessionUsageContent({ theme, layout, ...target }: PluginButtonContentProps) {
+function SessionUsageContent({ theme, host, layout, ...target }: PluginButtonContentProps) {
   const agentId = target.context === "agent" ? target.agentId : "";
-  const { data, error, isPending } = useSessionUsage(agentId);
+  const { data, error, isPending } = useSessionUsage(host.id, agentId);
   const rootStyle = { gap: 12, padding: layout.compact ? 4 : 0, minWidth: 260 };
   const note = (text: string, color = theme.colors.foregroundMuted) => (
     <Text style={{ fontSize: FONT.body, color }}>{text}</Text>
@@ -88,26 +88,7 @@ function SessionUsageContent({ theme, layout, ...target }: PluginButtonContentPr
               >
                 {model.model}
               </Text>
-              <Text
-                style={{
-                  fontSize: FONT.body,
-                  color: theme.colors.foreground,
-                  fontVariant: ["tabular-nums"],
-                }}
-              >
-                {formatTokens(model.usage.totalTokens)}
-              </Text>
-              <Text
-                style={{
-                  width: 52,
-                  textAlign: "right",
-                  fontSize: FONT.body,
-                  color: theme.colors.foregroundMuted,
-                  fontVariant: ["tabular-nums"],
-                }}
-              >
-                {formatCost(model.usage.cost)}
-              </Text>
+              <UsageAmounts theme={theme} usage={model.usage} />
             </View>
           ))}
         </View>

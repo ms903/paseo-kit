@@ -1,5 +1,6 @@
 import type { PluginTheme } from "@getpaseo/plugin";
-import { Pressable, Text, View, type PressableStateCallbackType } from "react-native";
+import { useState } from "react";
+import { Pressable, Text, View, type LayoutChangeEvent, type PressableStateCallbackType } from "react-native";
 import type { PeriodKind, UsagePeriod } from "../shared/usage";
 import { agentSwatch, foldAgents, OTHER_AGENT, type Swatch } from "./data";
 import { agentLabel, formatPeriodLong, formatPeriodShort, formatTokens } from "./format";
@@ -51,8 +52,8 @@ export function Segmented<Value extends string>({
             onPress={() => onChange(option.value)}
             style={({ hovered }: HoverState) => ({
               minWidth: 28,
-              paddingVertical: 3,
-              paddingHorizontal: 8,
+              paddingVertical: 6,
+              paddingHorizontal: 10,
               borderRadius: 6,
               alignItems: "center" as const,
               backgroundColor: selected
@@ -227,6 +228,8 @@ export function PeriodBars({
   onSelect,
   height,
   labelEvery,
+  today,
+  showScale = false,
 }: {
   theme: PluginTheme;
   kind: PeriodKind;
@@ -237,94 +240,102 @@ export function PeriodBars({
   height: number;
   /** Label every Nth column, counted back from the newest. */
   labelEvery: number;
+  today: string;
+  showScale?: boolean;
 }) {
+  const [plotWidth, setPlotWidth] = useState(0);
+  const onPlotLayout = (event: LayoutChangeEvent) => setPlotWidth(event.nativeEvent.layout.width);
   const peak = Math.max(1, ...periods.map((period) => period.usage.totalTokens));
-  const columnGap = periods.length > 20 ? 2 : 4;
+  const step = 10 ** Math.max(0, Math.floor(Math.log10(peak / 2)));
+  const max = showScale && peak > 1 ? Math.ceil(peak / (2 * step)) * 2 * step : peak;
+  const ticks = max > 1 ? [max, max / 2, 0] : [max, 0];
+  const columnGap = periods.length > 20 ? 3 : 5;
   const lastIndex = periods.length - 1;
+  const labelWidth = kind === "monthly" ? 57 : 49;
+  const labelStep = Math.max(labelEvery, Math.ceil(labelWidth * periods.length / (plotWidth || 240)));
   return (
-    <View style={{ gap: 4 }}>
-      <View style={{ height, flexDirection: "row", alignItems: "flex-end", gap: columnGap }}>
-        {periods.map((period, index) => {
-          const isSelected = index === selected;
-          const barHeight = (period.usage.totalTokens / peak) * height;
-          const segments = agentSegments(theme, order, period).filter((s) => s.value > 0);
-          return (
-            <Pressable
-              key={period.period}
-              accessibilityRole="button"
-              accessibilityState={{ selected: isSelected }}
-              accessibilityLabel={`${formatPeriodLong(kind, period.period)}: ${formatTokens(period.usage.totalTokens)} tokens`}
-              onPress={() => onSelect(index)}
-              // The whole column height is the hit target, not just the bar.
-              style={({ hovered }: HoverState) => ({
-                flex: 1,
-                height: "100%" as const,
-                justifyContent: "flex-end" as const,
-                borderRadius: 3,
-                backgroundColor: hovered && !isSelected ? theme.colors.surface2 : undefined,
-              })}
-            >
-              {segments.length === 0 ? (
-                <View
-                  style={{ height: 2, borderRadius: 1, backgroundColor: theme.colors.surface2 }}
-                />
-              ) : (
-                <View
-                  style={{
-                    height: Math.max(barHeight, 3),
-                    // Bottom-up: the heaviest agent sits on the baseline.
-                    flexDirection: "column-reverse",
+    <View style={{ flexDirection: "row", gap: 10, paddingTop: showScale ? 5 : 0 }}>
+      {showScale ? (
+        <View style={{ height: height + 12, marginTop: -6, alignItems: "flex-end", justifyContent: "space-between" }}>
+          {ticks.map((tick) => (
+            <Text key={tick} style={{ fontSize: 10, lineHeight: 12, fontVariant: ["tabular-nums"], color: theme.colors.foregroundMuted }}>
+              {formatTokens(tick)}
+            </Text>
+          ))}
+        </View>
+      ) : null}
+      <View onLayout={onPlotLayout} style={{ flex: 1, minWidth: 0, gap: 6 }}>
+        <View style={{ height, flexDirection: "row", gap: columnGap }}>
+          {(showScale ? ticks : [0]).map((tick) => (
+            <View key={tick} pointerEvents="none" style={{
+              position: "absolute", top: `${(1 - tick / max) * 100}%`, left: 0, right: 0,
+              height: 1, backgroundColor: theme.colors.border,
+            }} />
+          ))}
+          {periods.map((period, index) => {
+            const isSelected = index === selected;
+            const barHeight = (period.usage.totalTokens / max) * height;
+            const segments = agentSegments(theme, order, period).filter((segment) => segment.value > 0);
+            return (
+              <Pressable
+                key={period.period}
+                accessibilityRole="button"
+                accessibilityState={{ selected: isSelected }}
+                accessibilityLabel={`${formatPeriodLong(kind, period.period, today)}, ${formatTokens(period.usage.totalTokens)} tokens`}
+                onPress={() => onSelect(index)}
+                style={({ hovered }: HoverState) => ({
+                  flex: 1,
+                  minWidth: 0,
+                  justifyContent: "flex-end" as const,
+                  borderRadius: 3,
+                  backgroundColor: isSelected || hovered ? theme.colors.surface2 : undefined,
+                })}
+              >
+                {segments.length === 0 ? (
+                  <View style={{ height: 2, backgroundColor: isSelected ? theme.colors.accent : theme.colors.border }} />
+                ) : (
+                  <View style={{
+                    height: Math.max(barHeight, 3), flexDirection: "column-reverse",
                     gap: barHeight > segments.length * 4 ? 1 : 0,
-                    borderTopLeftRadius: 3,
-                    borderTopRightRadius: 3,
-                    overflow: "hidden",
-                    opacity: isSelected ? 1 : 0.45,
-                  }}
-                >
-                  {segments.map((segment) => (
-                    <View
-                      key={segment.key}
-                      style={{
-                        flexGrow: segment.value,
-                        flexBasis: 0,
-                        backgroundColor: segment.swatch.color,
-                        opacity: segment.swatch.opacity,
-                      }}
-                    />
-                  ))}
-                </View>
-              )}
-            </Pressable>
-          );
-        })}
-      </View>
-      <View style={{ flexDirection: "row", gap: columnGap }}>
-        {periods.map((period, index) => {
-          const labelled = (lastIndex - index) % labelEvery === 0 || index === selected;
-          return (
-            <View
-              key={period.period}
-              style={{ flex: 1, alignItems: "center", overflow: "visible" }}
-            >
-              {labelled ? (
-                <Text
-                  numberOfLines={1}
-                  style={{
-                    // Wider than its column so "Oct 5" fits; neighbours are unlabelled.
-                    width: 48,
-                    textAlign: "center",
-                    fontSize: 10,
-                    color:
-                      index === selected ? theme.colors.foreground : theme.colors.foregroundMuted,
-                    fontVariant: ["tabular-nums"],
-                  }}
-                >
-                  {formatPeriodShort(kind, period.period)}
-                </Text>
-              ) : null}
-            </View>
-          );
-        })}
+                    borderTopLeftRadius: 3, borderTopRightRadius: 3, overflow: "hidden",
+                    opacity: isSelected ? 1 : 0.65,
+                  }}>
+                    {segments.map((segment) => (
+                      <View key={segment.key} style={{
+                        flexGrow: segment.value, flexBasis: 0,
+                        backgroundColor: segment.swatch.color, opacity: segment.swatch.opacity,
+                      }} />
+                    ))}
+                  </View>
+                )}
+              </Pressable>
+            );
+          })}
+        </View>
+        <View style={{ flexDirection: "row", gap: columnGap, minHeight: 13 }}>
+          {periods.map((period, index) => {
+            const position = index === 0 ? "left" : index === lastIndex ? "right" : "center";
+            const labelled = index === selected || (
+              (lastIndex - index) % labelStep === 0 && Math.abs(index - selected) >= labelStep
+            );
+            return (
+              <View key={period.period} style={{
+                flex: 1, minWidth: 0, overflow: "visible",
+                alignItems: position === "left" ? "flex-start" : position === "right" ? "flex-end" : "center",
+              }}>
+                {labelled ? (
+                  <Text numberOfLines={1} style={{
+                    width: labelWidth, maxWidth: labelWidth, textAlign: position, fontSize: 10,
+                    fontWeight: index === selected ? "600" : "400",
+                    color: index === selected ? theme.colors.foreground : theme.colors.foregroundMuted,
+                  }}>
+                    {formatPeriodShort(kind, period.period)}
+                  </Text>
+                ) : null}
+              </View>
+            );
+          })}
+        </View>
       </View>
     </View>
   );

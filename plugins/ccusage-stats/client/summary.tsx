@@ -1,116 +1,101 @@
 import type { PluginTheme } from "@getpaseo/plugin";
 import { Icon } from "@getpaseo/plugin/client/react-native";
 import { useState } from "react";
-import { Pressable, Text, View, type PressableStateCallbackType } from "react-native";
+import { Pressable, Text, View, type PressableStateCallbackType, type TextStyle } from "react-native";
 import type { AgentUsage, PeriodKind, Usage, UsagePeriod } from "../shared/usage";
 import { ShareBar, SwatchDot, type ShareSegment } from "./charts";
 import { agentSwatch, foldAgents } from "./data";
 import {
   agentLabel,
-  CURRENT_LABEL,
   formatCost,
   formatPercent,
   formatPeriodLong,
+  formatPeriodRange,
   formatTokens,
-  PREVIOUS_LABEL,
 } from "./format";
 
 type HoverState = PressableStateCallbackType & { hovered?: boolean };
 
-export const FONT = { caption: 11, body: 12, title: 13, hero: 24 } as const;
+export const FONT = { caption: 11, body: 12, title: 13 } as const;
 
-/** The period's headline: a label, then total tokens with cost and change beside them. */
+const amountStyle: TextStyle = {
+  fontSize: FONT.body,
+  textAlign: "right",
+  fontVariant: ["tabular-nums"],
+};
+
 export function Headline({
   theme,
   kind,
   periods,
   index,
-  heroSize = FONT.hero,
+  today,
 }: {
   theme: PluginTheme;
   kind: PeriodKind;
   periods: readonly UsagePeriod[];
   index: number;
-  heroSize?: number;
+  today: string;
 }) {
   const period = periods[index];
   if (!period) return null;
-  const previous = periods[index - 1];
-  const isCurrent = index === periods.length - 1;
-  const label = isCurrent ? CURRENT_LABEL[kind] : formatPeriodLong(kind, period.period);
   return (
-    <View style={{ gap: 2 }}>
-      <Text style={{ fontSize: FONT.caption, color: theme.colors.foregroundMuted }}>{label}</Text>
-      <View
-        style={{ flexDirection: "row", alignItems: "baseline", flexWrap: "wrap", columnGap: 8 }}
-      >
-        <Text
-          style={{
-            fontSize: heroSize,
-            fontWeight: "600",
-            color: theme.colors.foreground,
-            fontVariant: ["tabular-nums"],
-          }}
-        >
+    <View style={{ gap: 4 }}>
+      <Text style={{ fontSize: FONT.title, fontWeight: "600", color: theme.colors.foreground }}>
+        {formatPeriodLong(kind, period.period, today)}
+      </Text>
+      {kind === "monthly" ? (
+        <Text style={{ fontSize: FONT.caption, color: theme.colors.foregroundMuted }}>
+          {formatPeriodRange(kind, period.period, today)}
+        </Text>
+      ) : null}
+      <View style={{ flexDirection: "row", alignItems: "baseline", flexWrap: "wrap", columnGap: 8 }}>
+        <Text style={{ fontSize: 22, fontWeight: "600", color: theme.colors.foreground, fontVariant: ["tabular-nums"] }}>
           {formatTokens(period.usage.totalTokens)}
         </Text>
         <Text style={{ fontSize: FONT.body, color: theme.colors.foregroundMuted }}>tokens</Text>
-        <Text
-          style={{
-            fontSize: FONT.title,
-            color: theme.colors.foreground,
-            fontVariant: ["tabular-nums"],
-          }}
-        >
+        <Text style={{ fontSize: FONT.title, color: theme.colors.foreground, fontVariant: ["tabular-nums"] }}>
           {formatCost(period.usage.cost)}
         </Text>
       </View>
-      {previous ? (
-        <Change
-          theme={theme}
-          current={period.usage.totalTokens}
-          previous={previous.usage.totalTokens}
-          against={isCurrent ? PREVIOUS_LABEL[kind] : "the period before"}
-        />
-      ) : null}
+      <TokenChange theme={theme} kind={kind} current={period.usage.totalTokens} previous={periods[index - 1]} />
     </View>
   );
 }
 
-/** Change against the previous period, in muted ink: more usage is not a fault. */
-function Change({
+export function TokenChange({
   theme,
+  kind,
   current,
   previous,
-  against,
 }: {
   theme: PluginTheme;
+  kind: PeriodKind;
   current: number;
-  previous: number;
-  against: string;
+  previous?: UsagePeriod;
 }) {
-  let icon = "Minus";
-  let text = `Same as ${against}`;
-  if (previous === 0) {
-    if (current === 0) return null;
-    icon = "TrendingUp";
-    text = `Nothing ${against}`;
-  } else if (current !== previous) {
-    const ratio = current / previous - 1;
-    icon = ratio > 0 ? "TrendingUp" : "TrendingDown";
-    text = `${ratio > 0 ? "+" : "−"}${formatPercent(Math.abs(ratio))} vs ${against} (${formatTokens(previous)})`;
-  }
+  const before = previous?.usage.totalTokens ?? 0;
+  if (!previous || (!before && !current)) return null;
+
+  const date = formatPeriodLong(kind, previous.period);
+  const delta = before > 0 ? current / before - 1 : 0;
+  const icon = current === before ? "Minus" : current > before ? "TrendingUp" : "TrendingDown";
+  const sign = delta > 0 ? "+" : delta < 0 ? "−" : "";
+  const detail = before > 0
+    ? `${sign}${formatPercent(Math.abs(delta))} vs ${date} (${formatTokens(before)})`
+    : `${date} · 0 tokens`;
   return (
-    <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
       <Icon name={icon} size={12} color={theme.colors.foregroundMuted} />
-      <Text style={{ fontSize: FONT.caption, color: theme.colors.foregroundMuted }}>{text}</Text>
+      <Text style={{ flexShrink: 1, fontSize: FONT.caption, color: theme.colors.foregroundMuted }}>
+        {detail}
+      </Text>
     </View>
   );
 }
 
-/** Input, output, cache write, cache read: what the total is made of. */
 export function Composition({ theme, usage }: { theme: PluginTheme; usage: Usage }) {
-  const parts: { key: string; label: string; value: number; swatch: ShareSegment["swatch"] }[] = [
+  const parts: (ShareSegment & { label: string })[] = [
     {
       key: "input",
       label: "Input",
@@ -138,69 +123,19 @@ export function Composition({ theme, usage }: { theme: PluginTheme; usage: Usage
   ];
   const total = Math.max(usage.totalTokens, 1);
   return (
-    <View style={{ gap: 6 }}>
-      <ShareBar theme={theme} segments={parts} height={6} />
-      <View style={{ flexDirection: "row", flexWrap: "wrap", columnGap: 12, rowGap: 4 }}>
-        {parts.map((part) => (
-          <View key={part.key} style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
-            <SwatchDot swatch={part.swatch} />
-            <Text style={{ fontSize: FONT.caption, color: theme.colors.foregroundMuted }}>
-              {part.label}
-            </Text>
-            <Text
-              style={{
-                fontSize: FONT.caption,
-                color: theme.colors.foreground,
-                fontVariant: ["tabular-nums"],
-              }}
-            >
-              {formatTokens(part.value)}
-            </Text>
-            <Text style={{ fontSize: FONT.caption, color: theme.colors.foregroundMuted }}>
-              {formatPercent(part.value / total)}
-            </Text>
-          </View>
-        ))}
-      </View>
-    </View>
-  );
-}
-
-function ModelRows({ theme, agent }: { theme: PluginTheme; agent: AgentUsage }) {
-  return (
-    <View style={{ gap: 4, paddingLeft: 14 }}>
-      {agent.models.map((model) => (
-        <View key={model.model} style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-          <Text
-            numberOfLines={1}
-            style={{
-              flex: 1,
-              minWidth: 0,
-              fontSize: FONT.caption,
-              color: theme.colors.foregroundMuted,
-            }}
-          >
-            {model.model}
+    <View style={{ gap: 8 }}>
+      <ShareBar theme={theme} segments={parts} height={8} />
+      {parts.map((part) => (
+        <View key={part.key} style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+          <SwatchDot swatch={part.swatch} />
+          <Text style={{ flex: 1, fontSize: FONT.body, color: theme.colors.foregroundMuted }}>
+            {part.label}
           </Text>
-          <Text
-            style={{
-              fontSize: FONT.caption,
-              color: theme.colors.foreground,
-              fontVariant: ["tabular-nums"],
-            }}
-          >
-            {formatTokens(model.usage.totalTokens)}
+          <Text style={[amountStyle, { color: theme.colors.foreground }]}>
+            {formatTokens(part.value)}
           </Text>
-          <Text
-            style={{
-              width: 48,
-              textAlign: "right",
-              fontSize: FONT.caption,
-              color: theme.colors.foregroundMuted,
-              fontVariant: ["tabular-nums"],
-            }}
-          >
-            {formatCost(model.usage.cost)}
+          <Text style={[amountStyle, { width: 40, color: theme.colors.foregroundMuted }]}>
+            {formatPercent(part.value / total)}
           </Text>
         </View>
       ))}
@@ -208,99 +143,172 @@ function ModelRows({ theme, agent }: { theme: PluginTheme; agent: AgentUsage }) 
   );
 }
 
-/**
- * One row per agent: swatch, name, share of the period, tokens, cost. With `expandable`, a press
- * reveals the agent's models.
- */
+interface UsageColumns {
+  tokens: number;
+  cost: number;
+}
+
+export function usageColumns(usages: readonly Usage[]): UsageColumns {
+  let tokens = 94;
+  let cost = 78;
+  for (const usage of usages) {
+    tokens = Math.max(tokens, formatTokens(usage.totalTokens).length * 8);
+    cost = Math.max(cost, formatCost(usage.cost).length * 8);
+  }
+  return { tokens, cost };
+}
+
+export function UsageAmounts({
+  theme,
+  usage,
+  columns,
+}: {
+  theme: PluginTheme;
+  usage: Usage;
+  columns?: UsageColumns;
+}) {
+  const amounts = (
+    <>
+      <Text style={[amountStyle, { width: columns?.tokens, color: theme.colors.foreground }]}>
+        {formatTokens(usage.totalTokens)}
+      </Text>
+      <Text style={[amountStyle, { width: columns?.cost, color: theme.colors.foregroundMuted }]}>
+        {formatCost(usage.cost)}
+      </Text>
+    </>
+  );
+  return columns ? amounts : <View style={{ alignItems: "flex-end", gap: 2 }}>{amounts}</View>;
+}
+
+export function UsageTableHeader({
+  theme,
+  label,
+  columns,
+  trailing,
+}: {
+  theme: PluginTheme;
+  label: string;
+  columns?: UsageColumns;
+  trailing?: number;
+}) {
+  const style = { fontSize: FONT.caption, color: theme.colors.foregroundMuted };
+  return (
+    <View style={{
+      flexDirection: "row", alignItems: "center", gap: 10, paddingBottom: 8,
+      borderBottomWidth: 1, borderBottomColor: theme.colors.border,
+    }}>
+      <Text style={[style, { flex: 1 }]}>{label}</Text>
+      {columns ? (
+        <>
+          <Text style={[style, { textAlign: "right", width: columns.tokens }]}>Tokens</Text>
+          <Text style={[style, { textAlign: "right", width: columns.cost }]}>Cost</Text>
+        </>
+      ) : <Text style={style}>Tokens / Cost</Text>}
+      {trailing ? <View style={{ width: trailing }} /> : null}
+    </View>
+  );
+}
+
+function ModelRows({
+  theme,
+  agent,
+  columns,
+}: {
+  theme: PluginTheme;
+  agent: AgentUsage;
+  columns?: UsageColumns;
+}) {
+  return (
+    <View style={{
+      backgroundColor: theme.colors.surface0, borderRadius: 6, paddingLeft: 16, paddingRight: 24,
+      marginBottom: 8,
+    }}>
+      {agent.models.map((model) => (
+        <View key={model.model} style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 6 }}>
+          <Text style={{ flex: 1, minWidth: 0, fontSize: FONT.body, color: theme.colors.foregroundMuted }}>
+            {model.model}
+          </Text>
+          <UsageAmounts theme={theme} usage={model.usage} columns={columns} />
+        </View>
+      ))}
+    </View>
+  );
+}
+
 export function AgentList({
   theme,
   order,
   period,
   expandable = false,
+  compact = true,
 }: {
   theme: PluginTheme;
   order: readonly string[];
   period: UsagePeriod | undefined;
   expandable?: boolean;
+  compact?: boolean;
 }) {
   const [expanded, setExpanded] = useState<string | null>(null);
-  const agents = period ? foldAgents(period.agents, order) : [];
-  if (!period || agents.length === 0) {
+  const agents = !period ? [] : expandable ? period.agents : foldAgents(period.agents, order);
+  if (!period || !agents.length) {
     return (
       <Text style={{ fontSize: FONT.body, color: theme.colors.foregroundMuted }}>
         No usage recorded in this period.
       </Text>
     );
   }
+  const columns = compact ? undefined : usageColumns(
+    agents.flatMap((agent) => [agent.usage, ...agent.models.map((model) => model.usage)]),
+  );
   const total = Math.max(period.usage.totalTokens, 1);
   return (
-    <View style={{ gap: 2 }}>
-      {agents.map((agent) => {
-        const open = expandable && expanded === agent.agent;
-        const share = agent.usage.totalTokens / total;
+    <View>
+      {expandable ? <UsageTableHeader theme={theme} label="Agent" columns={columns} trailing={14} /> : null}
+      {agents.map((agent, index) => {
+        const canExpand = expandable && agent.models.length > 0;
+        const open = canExpand && expanded === agent.agent;
+        const name = agentLabel(agent.agent);
+        const share = formatPercent(agent.usage.totalTokens / total);
         const row = (
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 8, minHeight: 24 }}>
-            <SwatchDot swatch={agentSwatch(theme, order, agent.agent)} />
-            <Text
-              numberOfLines={1}
-              style={{ flexShrink: 1, fontSize: FONT.body, color: theme.colors.foreground }}
-            >
-              {agentLabel(agent.agent)}
-            </Text>
-            <Text style={{ fontSize: FONT.caption, color: theme.colors.foregroundMuted }}>
-              {formatPercent(share)}
-            </Text>
-            <View style={{ flex: 1 }} />
-            <Text
-              style={{
-                fontSize: FONT.body,
-                color: theme.colors.foreground,
-                fontVariant: ["tabular-nums"],
-              }}
-            >
-              {formatTokens(agent.usage.totalTokens)}
-            </Text>
-            <Text
-              style={{
-                width: 52,
-                textAlign: "right",
-                fontSize: FONT.body,
-                color: theme.colors.foregroundMuted,
-                fontVariant: ["tabular-nums"],
-              }}
-            >
-              {formatCost(agent.usage.cost)}
-            </Text>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 10, minHeight: 38, paddingVertical: 6 }}>
+            <View style={{ flex: 1, minWidth: 0, flexDirection: "row", gap: 7, alignItems: "center" }}>
+              <SwatchDot swatch={agentSwatch(theme, order, agent.agent)} />
+              <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+                <Text style={{ fontSize: FONT.body, color: theme.colors.foreground }}>{name}</Text>
+                <Text style={{ fontSize: FONT.caption, color: theme.colors.foregroundMuted }}>{share}</Text>
+              </View>
+            </View>
+            <UsageAmounts theme={theme} usage={agent.usage} columns={columns} />
             {expandable ? (
-              <Icon
-                name={open ? "ChevronUp" : "ChevronDown"}
-                size={14}
-                color={theme.colors.foregroundMuted}
-              />
+              <View style={{ width: 14 }}>
+                {canExpand ? (
+                  <Icon name={open ? "ChevronUp" : "ChevronDown"} size={14} color={theme.colors.foregroundMuted} />
+                ) : null}
+              </View>
             ) : null}
           </View>
         );
         return (
-          <View key={agent.agent} style={{ gap: 4 }}>
-            {expandable ? (
+          <View key={agent.agent} style={{
+            borderTopWidth: index > 0 ? 1 : 0,
+            borderTopColor: theme.colors.border,
+          }}>
+            {canExpand ? (
               <Pressable
                 accessibilityRole="button"
                 accessibilityState={{ expanded: open }}
-                accessibilityLabel={`${agentLabel(agent.agent)}: ${formatTokens(agent.usage.totalTokens)} tokens, ${formatCost(agent.usage.cost)}`}
+                aria-expanded={open}
+                accessibilityLabel={`${name}, ${formatTokens(agent.usage.totalTokens)} tokens, ${formatCost(agent.usage.cost)}`}
                 onPress={() => setExpanded(open ? null : agent.agent)}
-                style={({ hovered }: HoverState) => ({
-                  marginHorizontal: -6,
-                  paddingHorizontal: 6,
-                  borderRadius: 6,
-                  backgroundColor: hovered ? theme.colors.surface2 : undefined,
+                style={({ hovered, pressed }: HoverState) => ({
+                  marginHorizontal: -6, paddingHorizontal: 6, borderRadius: 6,
+                  backgroundColor: hovered || pressed ? theme.colors.surface2 : undefined,
                 })}
               >
                 {row}
               </Pressable>
-            ) : (
-              row
-            )}
-            {open ? <ModelRows theme={theme} agent={agent} /> : null}
+            ) : row}
+            {open ? <ModelRows theme={theme} agent={agent} columns={columns} /> : null}
           </View>
         );
       })}
