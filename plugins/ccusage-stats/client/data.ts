@@ -29,7 +29,7 @@ export function useReadUsage(hostId: string) {
     if ("status" in result && result.status === "unchanged") {
       if (!previous || previous.revision !== result.revision) throw new Error("Usage report revision mismatch");
       report = {
-        ...previous, generatedAt: result.generatedAt, refreshing: result.refreshing,
+        ...previous, generatedAt: result.generatedAt, usageRefreshedAt: result.usageRefreshedAt, refreshing: result.refreshing,
         refreshError: result.refreshError, progress: result.progress,
       };
     } else {

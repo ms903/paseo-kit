@@ -82,10 +82,10 @@ export function formatPeriodLong(kind: PeriodKind, key: string, through?: string
   return kind === "monthly" ? longMonth.format(dateOf(key)) : formatPeriodRange(kind, key, through);
 }
 
-export function reportTimeFormatter(timeZone: string) {
+export function reportTimeFormatter(timeZone: string, seconds = false) {
   return new Intl.DateTimeFormat("en-US", {
     timeZone, month: "short", day: "numeric", year: "numeric",
-    hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+    hour: "2-digit", minute: "2-digit", second: seconds ? "2-digit" : undefined, hourCycle: "h23",
   });
 }
 

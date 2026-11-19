@@ -279,7 +279,7 @@ function Footer({
       ) : null}
       <View style={{ flexDirection: "row", alignItems: "center" }}>
         <Text style={{ flex: 1, fontSize: FONT.caption, color: theme.colors.foregroundMuted }}>
-          Updated {formatAgo(report.generatedAt)}
+          Usage refreshed {report.usageRefreshedAt === undefined ? "—" : formatAgo(report.usageRefreshedAt)}
         </Text>
         {refresh}
         <Pressable

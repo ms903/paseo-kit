@@ -210,7 +210,7 @@ export function createReportCache(scan = runCcusage, cacheDirectory?: string): R
 
   async function publish(
     today: string, daily: RawRow[], lifetimeSessions: RawRow[], antigravity: RawReport, prices: ReportPrices,
-    options: { from?: string; sessionsKnownFrom?: string; sessionError?: string | null } = {},
+    options: { from?: string; sessionsKnownFrom?: string; sessionError?: string | null; refreshed?: boolean } = {},
   ) {
     const sessionsPending = options.sessionsKnownFrom !== undefined;
     const base: RawReport = { daily, weekly: [], monthly: [], session: lifetimeSessions };
@@ -227,6 +227,7 @@ export function createReportCache(scan = runCcusage, cacheDirectory?: string): R
     if (options.from) report.historyPending = true;
     if (sessionsPending) report.sessionsPending = true;
     report.sessionRefreshError = options.sessionError ?? null;
+    report.usageRefreshedAt = options.refreshed ? report.generatedAt : snapshot?.report.usageRefreshedAt;
     version++;
     snapshot = { report, sessions };
     await store.saveReport(report);
@@ -235,6 +236,7 @@ export function createReportCache(scan = runCcusage, cacheDirectory?: string): R
   async function refresh(mode: RefreshMode) {
     const start = Date.now();
     const today = localToday(timezone);
+    const previousReads = history.dailyReads;
     try {
       const prices = priceCatalog.read();
       const inputs = Promise.all([readAntigravity(timezone, signal, undefined, prices), prices]);
@@ -279,17 +281,21 @@ export function createReportCache(scan = runCcusage, cacheDirectory?: string): R
         catalog = await priceCatalog.read();
         antigravity = await readAntigravity(timezone, signal, undefined, catalog);
       }
+      const refreshed = history.dailyReads !== previousReads && !session.error;
       const unchanged = rendered?.history === history.revision && rendered.antigravity === antigravity
         && rendered.catalog === catalog && snapshot?.report.today === today;
       if (unchanged && snapshot && !session.error) {
-        snapshot.report = { ...snapshot.report, generatedAt: Date.now() };
+        const generatedAt = Date.now();
+        const usageRefreshedAt = refreshed ? generatedAt : snapshot.report.usageRefreshedAt;
+        snapshot.report = { ...snapshot.report, generatedAt, usageRefreshedAt };
+        await store.saveRefreshTime(usageRefreshedAt);
       } else {
         const rows = session.rows;
         const incomplete = !!session.error && !rows.length;
         const source = incomplete ? session.pricingWindow?.recent ?? [] : rows;
         const prices = await preparePrices(source, timezone, catalog, signal, ["daily", "session"]);
         await publish(today, daily, rows, antigravity, prices, {
-          sessionError: session.error,
+          sessionError: session.error, refreshed,
           sessionsKnownFrom: incomplete ? session.pricingWindow?.since ?? tomorrow : undefined,
         });
         rendered = { history: history.revision, antigravity, catalog };
@@ -354,7 +360,7 @@ export function createReportCache(scan = runCcusage, cacheDirectory?: string): R
     const progress = stage && { stage: stage.name, elapsedSeconds: Math.max(0, Math.floor((Date.now() - stage.start) / 1000)) };
     if (snapshot) {
       const revision = `${instance}:${version}`;
-      const status = { revision, generatedAt: snapshot.report.generatedAt, refreshing: running, refreshError, progress };
+      const status = { revision, generatedAt: snapshot.report.generatedAt, usageRefreshedAt: snapshot.report.usageRefreshedAt, refreshing: running, refreshError, progress };
       return knownRevision === revision ? { status: "unchanged", ...status } : { ...snapshot.report, ...status };
     }
     if (refreshError && !running) throw new Error(refreshError);

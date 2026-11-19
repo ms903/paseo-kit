@@ -237,9 +237,10 @@ function Body({
   const cacheHit = period && prompt > 0 ? formatPercent(period.usage.cacheReadTokens / prompt) : "—";
   const modelCount = period ? new Set(period.agents.flatMap((agent) => agent.models.map((model) => model.model))).size : 0;
   const columnStyle: ViewStyle | undefined = split ? { flex: 1, minWidth: 0 } : undefined;
+  const refreshClock = useMemo(() => reportTimeFormatter(timezone, true), [timezone]);
   const updated = (
     <Text style={{ fontSize: FONT.caption, color: theme.colors.foregroundMuted }}>
-      Updated {clock.format(report.generatedAt)} · {timezone}
+      Usage last refreshed {report.usageRefreshedAt === undefined ? "—" : refreshClock.format(report.usageRefreshedAt)} · {timezone}
     </Text>
   );
 

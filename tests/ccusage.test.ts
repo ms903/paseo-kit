@@ -423,3 +423,46 @@ test("a restart during session indexing keeps the calendar and publishes new act
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("last usage refresh survives restart and advances only on a successful scan", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: new Date("2026-11-20T04:50:01Z") });
+  t.mock.method(console, "error", () => {});
+  t.mock.method(globalThis, "fetch", async () => Response.json({ openai: { models: { fixture: { cost: { input: 3, output: 1 } } } } }));
+  const root = await mkdtemp(path.join(os.tmpdir(), "paseo-usage-clock-"));
+  const original = process.env.XDG_CACHE_HOME;
+  process.env.XDG_CACHE_HOME = root;
+  let failed = false;
+  const cache = createReportCache(async (kind, tz, _signal, _since, until) => {
+    if (failed) throw new Error("scan failed");
+    return until ? [] : [row(kind === "daily" ? localToday(tz) : "resumed", 100)];
+  }, root);
+  try {
+    const first = await complete(cache);
+    assert.equal(first.usageRefreshedAt, Date.now());
+    const file = path.join(root, "report.json.gz");
+    const before = (await stat(file)).mtimeMs;
+    t.mock.timers.tick(2_000);
+    await cache.read(true);
+    const checked = await complete(cache);
+    assert.equal(checked.usageRefreshedAt, Date.now());
+    assert.equal((await stat(file)).mtimeMs, before);
+    assert.equal((await createUsageStore(first.timezone, root).readReport())?.usageRefreshedAt, checked.usageRefreshedAt);
+    const delta = await cache.read(false, first.revision);
+    assert.ok("status" in delta && delta.status === "unchanged");
+    assert.equal(delta.usageRefreshedAt, checked.usageRefreshedAt);
+    t.mock.timers.tick(3_000);
+    await cache.updatePrices();
+    assert.equal((await complete(cache)).usageRefreshedAt, checked.usageRefreshedAt);
+    failed = true;
+    t.mock.timers.tick(5_000);
+    await cache.read(true);
+    const stale = await complete(cache);
+    assert.equal(stale.refreshError, "scan failed");
+    assert.equal(stale.usageRefreshedAt, checked.usageRefreshedAt);
+  } finally {
+    cache.stop();
+    if (original === undefined) delete process.env.XDG_CACHE_HOME;
+    else process.env.XDG_CACHE_HOME = original;
+    await rm(root, { recursive: true, force: true });
+  }
+});

@@ -35,6 +35,7 @@ test("shows the report's exact calendar dates and inclusive date ranges", () => 
     formatPeriodLong("weekly", "2026-12-28"),
     "December 28, 2026 – January 3, 2027",
   );
+  assert.equal(reportTimeFormatter("Asia/Hong_Kong", true).format(Date.UTC(2026, 10, 19, 20, 50, 39)), "Nov 20, 2026, 04:50:39");
   const utc = Date.UTC(2026, 10, 18, 16, 17);
   assert.equal(reportTimeFormatter("Asia/Hong_Kong").format(utc), "Nov 19, 2026, 00:17");
 });

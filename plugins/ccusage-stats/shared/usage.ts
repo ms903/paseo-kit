@@ -43,6 +43,7 @@ export type ScanProgress = z.infer<typeof progressSchema>;
 export const usageReportSchema = z.object({
   /** When ccusage last produced this report, in epoch milliseconds. */
   generatedAt: z.number(),
+  usageRefreshedAt: z.number().optional(),
   revision: z.string().optional(),
   /** The daemon's local date, the same calendar ccusage groups by. */
   today: z.string(),
@@ -79,6 +80,7 @@ const unchangedSchema = z.object({
   status: z.literal("unchanged"),
   revision: z.string(),
   generatedAt: z.number(),
+  usageRefreshedAt: z.number().optional(),
   refreshing: z.boolean(),
   refreshError: z.string().nullable(),
   progress: progressSchema.optional(),

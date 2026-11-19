@@ -33,6 +33,7 @@ export function createUsageStore(timezone: string, directory = path.join(paseoHo
   const sources = SOURCE_PATHS.map((name) => process.env[name]);
   const scope = createHash("sha256").update(JSON.stringify([1, os.hostname(), timezone, sources])).digest("hex");
   let lastContent = "";
+  let savedRefreshAt: number | undefined;
   let prepared: Promise<void> | undefined;
 
   async function prepare() {
@@ -92,6 +93,11 @@ export function createUsageStore(timezone: string, directory = path.join(paseoHo
     const { today, timezone, agents, daily, weekly, monthly, recentSessions, sessionRefreshError } = report;
     const values = [today, timezone, agents, daily, weekly, monthly, recentSessions, sessionRefreshError, report.historyPending, report.sessionsPending];
     return createHash("sha256").update(JSON.stringify(values)).digest("hex");
+  }
+
+  async function saveRefreshTime(at: number | undefined) {
+    if (at === undefined || at === savedRefreshAt || !lastContent) return;
+    if (await write("last-refresh.json.gz", { content: lastContent, at }, 1024)) savedRefreshAt = at;
   }
 
   return {
@@ -158,12 +164,18 @@ export function createUsageStore(timezone: string, directory = path.join(paseoHo
       if (!report || report.timezone !== timezone || !report.daily.length) return;
       if (!report.historyPending && (!report.weekly.length || !report.monthly.length)) return;
       lastContent = contentOf(report);
+      const stamp = await read("last-refresh.json.gz", 1024, z.object({ content: z.string(), at: z.number() }));
+      if (stamp?.content === lastContent && stamp.at > (report.usageRefreshedAt ?? 0)) report.usageRefreshedAt = stamp.at;
+      savedRefreshAt = report.usageRefreshedAt;
       return report;
     },
     async saveReport(report: UsageReport) {
       const content = contentOf(report);
-      if (content !== lastContent && await write("report.json.gz", report, REPORT_LIMIT)) lastContent = content;
+      if (content === lastContent) return saveRefreshTime(report.usageRefreshedAt);
+      lastContent = await write("report.json.gz", report, REPORT_LIMIT) ? content : "";
+      savedRefreshAt = report.usageRefreshedAt;
     },
+    saveRefreshTime,
     readHistory(kind: ScanKind) {
       return read(`history-${kind}.json.gz`, HISTORY_LIMIT, historySchema);
     },

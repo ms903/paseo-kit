@@ -38,6 +38,7 @@ export function createUsageHistory(timezone: string, signal: AbortSignal, scan =
   let sessionError: string | null = null;
   let nextSessionAt = 0;
   let sessionFailures = 0;
+  let dailyReads = 0;
   let dailySignature: string | undefined;
   let sessionSignature: string | undefined;
   let verifySessionsAt = 0;
@@ -131,6 +132,7 @@ export function createUsageHistory(timezone: string, signal: AbortSignal, scan =
       const window = await openWindow("daily", today, mode);
       await onRecent?.(window.recent, window.since);
       const days = await readWindow("daily", window, today);
+      dailyReads++;
       const cutoff = saved.get("daily")!.since;
       lastDays = { today, recent: days.filter((row) => row.period >= cutoff) };
       return structuredClone(days);
@@ -144,6 +146,7 @@ export function createUsageHistory(timezone: string, signal: AbortSignal, scan =
       }
     },
     readSessions,
+    get dailyReads() { return dailyReads; },
     get revision() { return `${dailySignature}:${sessionRevision}:${sessionError}`; },
   };
 }
