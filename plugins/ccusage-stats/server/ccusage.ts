@@ -40,26 +40,35 @@ function registeredPluginDirectories(): string[] {
   }
 }
 
-function isThisPlugin(directory: string): boolean {
+function scannerPackage(directory: string): { dependencies?: Record<string, unknown> } | undefined {
   try {
     const manifest = JSON.parse(readFileSync(path.join(directory, "package.json"), "utf8")) as {
       name?: unknown;
+      dependencies?: Record<string, unknown>;
     };
-    return manifest.name === "ccusage-stats";
+    if (manifest.name === "ccusage-stats") return manifest;
   } catch {
-    return false;
+    return undefined;
   }
 }
 
 export interface CcusageBinary {
   file: string;
-  source: "bundled" | "path";
+  source: "local" | "bundled" | "path";
 }
 
 export function locateCcusage(): CcusageBinary {
   // Only our own install: never run a binary out of another plugin's directory.
-  for (const directory of registeredPluginDirectories().filter(isThisPlugin)) {
-    const file = path.join(directory, "node_modules", NATIVE_PACKAGE, "bin", BINARY_NAME);
+  for (const directory of registeredPluginDirectories()) {
+    const manifest = scannerPackage(directory);
+    if (!manifest) continue;
+    const modules = path.join(directory, "node_modules");
+    const version = manifest.dependencies?.ccusage;
+    if (typeof version === "string" && /^\d+\.\d+\.\d+$/.test(version)) {
+      const local = path.join(modules, ".paseo-ccusage", version, BINARY_NAME);
+      if (isExecutable(local)) return { file: local, source: "local" };
+    }
+    const file = path.join(modules, NATIVE_PACKAGE, "bin", BINARY_NAME);
     if (isExecutable(file)) return { file, source: "bundled" };
   }
   return { file: "ccusage", source: "path" };

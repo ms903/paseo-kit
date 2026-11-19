@@ -1,0 +1,29 @@
+name: ccusage scanner
+
+on:
+  pull_request:
+    paths: ['plugins/ccusage-stats/native/**', 'plugins/ccusage-stats/package*.json', 'plugins/ccusage-stats/server/ccusage.ts', '.github/workflows/ccusage-scanner.yml']
+  push:
+    branches: [main]
+    paths: ['plugins/ccusage-stats/native/**', 'plugins/ccusage-stats/package*.json', 'plugins/ccusage-stats/server/ccusage.ts', '.github/workflows/ccusage-scanner.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  native-parity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: plugins/ccusage-stats
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: plugins/ccusage-stats/package-lock.json
+      - run: npm ci --omit=dev
+      - run: npm run build:scanner
+      - run: npm run check:scanner

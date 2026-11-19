@@ -26,3 +26,9 @@ npm run typecheck
 paseo plugin reload ccusage-stats
 paseo plugin logs ccusage-stats
 ```
+
+### Try the smaller native scanner
+
+Run `npm run build:scanner` in the plugin directory registered with the Paseo daemon. The build uses Node.js, Git, curl, rustup, and a C toolchain. It takes the ccusage version from `package.json`, checks out the matching upstream tag, and builds the offline JSON entry point with the upstream Rust toolchain, Cargo lockfile, and pricing snapshots. The plugin selects the resulting executable for that version. A normal plugin install uses the platform binary from npm.
+
+To update the scanner, update the exact npm dependency and its lockfile. The scanner workflow rebuilds the entry point against that same release and compares its daily and session JSON with the official package on a test fixture. Run `npm run check:scanner` in a test environment to repeat the comparison.

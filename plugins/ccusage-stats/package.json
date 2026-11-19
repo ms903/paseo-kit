@@ -19,10 +19,13 @@
     "client/",
     "server/",
     "shared/",
-    "assets/"
+    "assets/",
+    "native/"
   ],
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "build:scanner": "node native/build.mjs",
+    "check:scanner": "node native/check.mjs"
   },
   "devDependencies": {
     "@getpaseo/plugin": "0.11.1",

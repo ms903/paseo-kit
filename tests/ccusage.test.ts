@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
-import { describeCcusageFailure, type RawRow } from "../plugins/ccusage-stats/server/ccusage";
+import { describeCcusageFailure, locateCcusage, type RawRow } from "../plugins/ccusage-stats/server/ccusage";
 import { joinSessions, rollupDays } from "../plugins/ccusage-stats/server/usage-rows";
 import { createUsageHistory } from "../plugins/ccusage-stats/server/usage-history";
 import { createUsageStore } from "../plugins/ccusage-stats/server/usage-store";
@@ -17,6 +17,34 @@ test("identifies ccusage timeouts, termination signals, and quiet exit codes", (
   assert.equal(describeCcusageFailure({ code: 2 }, "invalid timezone\n", "daily"), "ccusage exited (2). invalid timezone");
   assert.equal(describeCcusageFailure({ code: "ENOENT" }, "", "session"), "ccusage executable was not found");
   assert.equal(describeCcusageFailure({ code: "ERR_CHILD_PROCESS_STDIO_MAXBUFFER" }, "", "session"), "ccusage output exceeded the size limit");
+});
+
+
+test("uses a locally built scanner only for the registered plugin's pinned release", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "paseo-scanner-discovery-"));
+  const previous = process.env.PASEO_HOME;
+  process.env.PASEO_HOME = root;
+  t.after(async () => {
+    if (previous === undefined) delete process.env.PASEO_HOME;
+    else process.env.PASEO_HOME = previous;
+    await rm(root, { recursive: true, force: true });
+  });
+
+  const directory = path.join(root, "plugin");
+  const modules = path.join(directory, "node_modules");
+  const executable = process.platform === "win32" ? "ccusage.exe" : "ccusage";
+  const native = path.join(modules, "@ccusage", `ccusage-${process.platform}-${process.arch}`, "bin", executable);
+  const local = path.join(modules, ".paseo-ccusage", "20.0.51", executable);
+  for (const file of [native, local]) {
+    await mkdir(path.dirname(file), { recursive: true });
+    await writeFile(file, "", { mode: 0o755 });
+  }
+  await writeFile(path.join(root, "config.json"), JSON.stringify({ plugins: { "ccusage-stats": { path: directory } } }));
+  const manifest = path.join(directory, "package.json");
+  await writeFile(manifest, JSON.stringify({ name: "ccusage-stats", dependencies: { ccusage: "20.0.51" } }));
+  assert.deepEqual(locateCcusage(), { file: local, source: "local" });
+  await writeFile(manifest, JSON.stringify({ name: "ccusage-stats", dependencies: { ccusage: "20.0.52" } }));
+  assert.deepEqual(locateCcusage(), { file: native, source: "bundled" });
 });
 
 function row(period: string, tokens: number, agent = "codex"): RawRow {
