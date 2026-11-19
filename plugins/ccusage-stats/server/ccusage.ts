@@ -76,6 +76,7 @@ const rawModel = z.object({
   modelName: z.string(),
   cost: z.number().default(0),
   missingPricing: z.boolean().optional(),
+  costPending: z.literal(true).optional(),
   ...rawUsage,
 });
 

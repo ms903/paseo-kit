@@ -7,7 +7,7 @@ const usageSchema = z.object({
   cacheCreationTokens: z.number(),
   cacheReadTokens: z.number(),
   totalTokens: z.number(),
-  cost: z.number(),
+  cost: z.number().nullable(),
 });
 
 const modelUsageSchema = z.object({ model: z.string(), usage: usageSchema });
@@ -34,9 +34,16 @@ const sessionSchema = z.object({
   lastActivity: z.string().nullable(),
 });
 
+const progressSchema = z.object({
+  stage: z.enum(["recentSessions", "dailyHistory", "sessionHistory"]),
+  elapsedSeconds: z.number().nonnegative(),
+});
+export type ScanProgress = z.infer<typeof progressSchema>;
+
 export const usageReportSchema = z.object({
   /** When ccusage last produced this report, in epoch milliseconds. */
   generatedAt: z.number(),
+  revision: z.string().optional(),
   /** The daemon's local date, the same calendar ccusage groups by. */
   today: z.string(),
   timezone: z.string(),
@@ -51,6 +58,9 @@ export const usageReportSchema = z.object({
   /** Set when the latest refresh failed and an older report is served instead. */
   refreshError: z.string().nullable(),
   refreshing: z.boolean().optional(),
+  historyPending: z.boolean().optional(),
+  sessionsPending: z.boolean().optional(),
+  progress: progressSchema.optional(),
 });
 
 const previewSchema = z.object({
@@ -58,16 +68,28 @@ const previewSchema = z.object({
   today: z.string(),
   totalTokens: z.number(),
   refreshError: z.string().nullable(),
+  progress: progressSchema.optional(),
 });
 const reportResponseSchema = z.union([usageReportSchema, previewSchema, z.object({ status: z.literal("loading") })]);
 export type UsageReport = z.infer<typeof usageReportSchema>;
 export type TodayPreview = z.infer<typeof previewSchema>;
 export type ReportResponse = z.infer<typeof reportResponseSchema>;
 
+const unchangedSchema = z.object({
+  status: z.literal("unchanged"),
+  revision: z.string(),
+  generatedAt: z.number(),
+  refreshing: z.boolean(),
+  refreshError: z.string().nullable(),
+  progress: progressSchema.optional(),
+});
+const usageReadSchema = z.union([unchangedSchema, reportResponseSchema]);
+export type UsageRead = z.infer<typeof usageReadSchema>;
+
 export const usageReportRpc = defineRpc({
   name: "usage.report",
-  input: z.object({ retry: z.boolean().optional() }),
-  output: reportResponseSchema,
+  input: z.object({ refresh: z.boolean().optional(), retry: z.boolean().optional(), knownRevision: z.string().max(80).optional() }),
+  output: usageReadSchema,
 });
 
 export const updatePricesRpc = defineRpc({

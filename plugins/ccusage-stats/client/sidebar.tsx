@@ -1,7 +1,7 @@
 import type { PluginTheme } from "@getpaseo/plugin";
 import type { PluginPopoverProps, PluginSidebarItemProps } from "@getpaseo/plugin/client";
 import { Icon } from "@getpaseo/plugin/client/react-native";
-import { useCallback, useState } from "react";
+import { useCallback, useState, type ReactNode } from "react";
 import {
   Pressable,
   Text,
@@ -18,7 +18,8 @@ import {
   type TypicalDay,
   type UsageReport,
 } from "./data";
-import { formatAgo, formatCost, formatPercent, formatPeriodLong, formatTokens } from "./format";
+import { formatAgo, formatCost, formatPercent, formatPeriodLong, formatScanProgress, formatTokens } from "./format";
+import { RefreshUsageButton } from "./refresh";
 import { AgentList, FONT, Headline, TodayUsage } from "./summary";
 
 // Geometry follows the built-in usage summary and host-monitor in the same footer.
@@ -61,15 +62,15 @@ export function UsageSidebarItem({ theme, host, openPopover }: PluginSidebarItem
   // Like the built-in usage summary: nothing until there is something to show.
   if (!data && !preview && !error) return null;
   const today = data ? todayOf(data) : undefined;
-  const typical = data ? typicalDay(data.daily) : null;
+  const typical = data && !data.historyPending ? typicalDay(data.daily) : null;
   const tokens = formatTokens(today?.usage.totalTokens ?? preview?.totalTokens ?? 0);
-  const cost = formatCost(today?.usage.cost ?? 0);
+  const cost = formatCost(today?.usage.cost ?? null);
   const labelWidth = ICON_SIZE + ICON_GAP + tokens.length * DIGIT_WIDTH;
   const costWidth = labelWidth + TEXT_GAP + cost.length * DIGIT_WIDTH;
   const meterWidth = costWidth + MIN_METER_WIDTH + TEXT_GAP;
   const width = available ?? meterWidth;
   const pace =
-    today && typical && !typical.estimated
+    today && today.usage.cost !== null && typical && !typical.estimated
       ? `, ${formatPercent(today.usage.cost / typical.cost)} of a typical day`
       : "";
   const label = today
@@ -94,7 +95,7 @@ export function UsageSidebarItem({ theme, host, openPopover }: PluginSidebarItem
         }}
       >
         <Icon name="Coins" size={ICON_SIZE} color={theme.colors.foregroundMuted} />
-        {today && data && typical ? (
+        {today && data ? (
           <>
             {width >= labelWidth ? (
               <Text style={{
@@ -104,7 +105,7 @@ export function UsageSidebarItem({ theme, host, openPopover }: PluginSidebarItem
                 {tokens}
               </Text>
             ) : null}
-            {width >= meterWidth ? (
+            {width >= meterWidth && typical && today.usage.cost !== null ? (
               <View style={{ flex: 1, minWidth: MIN_METER_WIDTH, marginLeft: TEXT_GAP }}>
                 <PaceBar
                   theme={theme}
@@ -149,7 +150,7 @@ export function UsageSidebarItem({ theme, host, openPopover }: PluginSidebarItem
 
 export function UsagePopover({ theme, host, layout, openScreen }: PluginPopoverProps) {
   const { data, error, isPending, preview } = useUsageReport(host.id);
-  const [kind, setKind] = useState<PeriodKind>("daily");
+  const [requestedKind, setKind] = useState<PeriodKind>("daily");
   const [pickedKey, setPickedKey] = useState<string | null>(null);
   const rootStyle = {
     gap: 12,
@@ -158,7 +159,8 @@ export function UsagePopover({ theme, host, layout, openScreen }: PluginPopoverP
     backgroundColor: theme.colors.surface1,
   };
 
-  if (preview) return <View style={rootStyle}><TodayUsage theme={theme} preview={preview} /></View>;
+  const refresh = <RefreshUsageButton theme={theme} hostId={host.id} refreshing={!error && (isPending || !!data?.refreshing)} compact />;
+  if (preview) return <View style={rootStyle}><TodayUsage theme={theme} preview={preview} />{refresh}</View>;
   if (!data) {
     return (
       <View style={rootStyle}>
@@ -171,12 +173,15 @@ export function UsagePopover({ theme, host, layout, openScreen }: PluginPopoverP
         >
           {isPending ? "Reading usage logs..." : (error?.message ?? "Usage is unavailable.")}
         </Text>
+        {error ? refresh : null}
       </View>
     );
   }
 
+  const kind = data[requestedKind].length ? requestedKind : "daily";
+  const options = PERIOD_OPTIONS.filter(({ value }) => data[value].length > 0);
   const periods = data[kind].slice(-POPOVER_PERIODS[kind]);
-  const typical = typicalDay(data.daily);
+  const typical = data.historyPending ? null : typicalDay(data.daily);
   const picked = periods.findIndex(({ period }) => period === pickedKey);
   const selected = picked < 0 ? periods.length - 1 : picked;
   const changeKind = (next: PeriodKind) => {
@@ -190,16 +195,16 @@ export function UsagePopover({ theme, host, layout, openScreen }: PluginPopoverP
         <Text style={{ flex: 1, fontSize: FONT.title, color: theme.colors.foreground }}>
           Token usage
         </Text>
-        <Segmented
+        {options.length > 1 ? <Segmented
           theme={theme}
-          options={PERIOD_OPTIONS}
+          options={options}
           value={kind}
           onChange={changeKind}
           accessibilityLabel="Period"
-        />
+        /> : null}
       </View>
       <Headline theme={theme} kind={kind} periods={periods} index={selected} today={data.today} />
-      {kind === "daily" ? (
+      {kind === "daily" && typical ? (
         <View style={{ gap: 2 }}>
           {typicalCaption(typical).map((line) => (
             <Text key={line} style={{ fontSize: FONT.caption, color: theme.colors.foregroundMuted }}>
@@ -222,7 +227,7 @@ export function UsagePopover({ theme, host, layout, openScreen }: PluginPopoverP
       <Legend theme={theme} order={data.agents} periods={periods} />
       <View style={{ height: 1, backgroundColor: theme.colors.border }} />
       <AgentList theme={theme} order={data.agents} period={periods[selected]} />
-      <Footer theme={theme} report={data} onMore={() => openScreen({
+      <Footer theme={theme} report={data} refresh={refresh} onMore={() => openScreen({
         screenId: "usage",
         params: pickedKey ? { kind, period: pickedKey } : { kind },
       })} />
@@ -248,22 +253,27 @@ function typicalCaption(typical: TypicalDay): string[] {
 function Footer({
   theme,
   report,
+  refresh,
   onMore,
 }: {
   theme: PluginTheme;
   report: UsageReport;
+  refresh: ReactNode;
   onMore(): void;
 }) {
   return (
     <View style={{ gap: 6 }}>
-      {report.refreshError ? (
+      {report.progress && !report.refreshError ? (
+        <Text style={{ fontSize: FONT.caption, color: theme.colors.foregroundMuted }}>{formatScanProgress(report.progress)}</Text>
+      ) : null}
+      {report.refreshError || report.sessionRefreshError ? (
         <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
           <Icon name="TriangleAlert" size={12} color={theme.colors.statusWarning} />
           <Text
             numberOfLines={2}
             style={{ flex: 1, fontSize: FONT.caption, color: theme.colors.statusWarning }}
           >
-            Showing older numbers: {report.refreshError}
+            {report.refreshError ? `Could not refresh usage. ${report.refreshError}` : `Could not refresh sessions. ${report.sessionRefreshError}`}
           </Text>
         </View>
       ) : null}
@@ -271,6 +281,7 @@ function Footer({
         <Text style={{ flex: 1, fontSize: FONT.caption, color: theme.colors.foregroundMuted }}>
           Updated {formatAgo(report.generatedAt)}
         </Text>
+        {refresh}
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Open usage details"

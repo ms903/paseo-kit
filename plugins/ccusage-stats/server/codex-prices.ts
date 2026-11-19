@@ -7,7 +7,8 @@ import { pipeline } from "node:stream/promises";
 import * as zlib from "node:zlib";
 import { z } from "zod";
 import type { UsageStore } from "./usage-store";
-import type { RawReport } from "./ccusage";
+import type { RawReport, RawRow } from "./ccusage";
+import { weekOf } from "./usage-rows";
 import {
   findModelPrice,
   priceTokens,
@@ -389,31 +390,29 @@ async function rolloutSource(session: string, homes: string[]) {
   }
 }
 
-function periodKeys(
-  day: string,
-  session: string,
-): Record<(typeof PERIODS)[number], string> {
-  const week = new Date(`${day}T00:00:00Z`);
-  week.setUTCDate(week.getUTCDate() - ((week.getUTCDay() + 6) % 7));
-  return {
-    daily: day,
-    weekly: week.toISOString().slice(0, 10),
-    monthly: day.slice(0, 7),
-    session,
-  };
+function periodKey(kind: keyof RawReport, day: string, session: string): string {
+  switch (kind) {
+    case "session": return session;
+    case "weekly": return weekOf(day);
+    case "monthly": return day.slice(0, 7);
+    case "daily": return day;
+  }
 }
 
-/** Reuses ccusage's report rows. Request-level prices replace a row only when the token counts agree. */
+export type ReportPrices = (report: RawReport, sessionsKnownFrom?: string) => void;
+
+/** Reuse the same request-level prices as the calendar grows from recent days to a full year. */
 export function createReportPricer(homes = defaultHomes(), store?: UsageStore, readFile = readRollout) {
   const index = store?.fileIndex("codex", z.array(bucketSchema));
   const cached = new Map<string, { signature: string; buckets: Bucket[] }>();
 
-  return async function applyPrices(
-    report: RawReport,
+  return async function preparePrices(
+    sessionSources: RawRow[],
     timezone: string,
     catalog: PriceCatalog,
     signal: AbortSignal,
-  ): Promise<void> {
+    sections: readonly (keyof RawReport)[] = PERIODS,
+  ): Promise<ReportPrices> {
     const tallies = {
       daily: new Map<string, PricedUsage>(),
       weekly: new Map<string, PricedUsage>(),
@@ -427,7 +426,7 @@ export function createReportPricer(homes = defaultHomes(), store?: UsageStore, r
         ),
       ),
     ].sort((a, b) => a - b);
-    const sessions = report.session.filter(
+    const sessions = sessionSources.filter(
       (row) =>
         row.agent === "codex" &&
         row.modelBreakdowns.some((model) =>
@@ -469,9 +468,8 @@ export function createReportPricer(homes = defaultHomes(), store?: UsageStore, r
           const cost =
             priceTokens(bucket.tokens, price, bucket.contextSize) *
             bucket.multiplier;
-          const keys = periodKeys(bucket.day, session.period);
-          for (const kind of PERIODS) {
-            const key = JSON.stringify([keys[kind], bucket.model]);
+          for (const kind of sections) {
+            const key = JSON.stringify([periodKey(kind, bucket.day, session.period), bucket.model]);
             const total = tallies[kind].get(key) ?? { ...ZERO_TOKENS, cost: 0 };
             addTokens(total, bucket.tokens);
             total.cost += cost;
@@ -481,36 +479,46 @@ export function createReportPricer(homes = defaultHomes(), store?: UsageStore, r
       }
     }
 
-    if (sessions.length) await Promise.all([readSessions(), readSessions()]);
-    if (!signal.aborted) await index?.flush();
-    for (const kind of PERIODS) {
-      for (const row of report[kind]) {
-        for (const agent of row.agents ?? [row]) {
-          if (agent.agent === "antigravity") continue;
-          for (const model of agent.modelBreakdowns) {
-            const gpt = gpt62Price(catalog, model.modelName);
-            const measured =
-              agent.agent === "codex" && gpt
-                ? tallies[kind].get(
-                    JSON.stringify([row.period, model.modelName]),
-                  )
-                : undefined;
-            let cost = model.cost;
-            if (measured && sameTokens(measured, model)) {
-              cost = measured.cost;
-            } else {
-              const price = gpt ?? findModelPrice(catalog, model.modelName);
-              // ccusage prices context tiers and DeepSeek's timestamped rates from its own request data.
-              const flat = price?.context.length === 0 && !/deepseek-v4-(flash|pro)/i.test(model.modelName);
-              if (price && (flat || (model.cost === 0 && (gpt || model.missingPricing)))) {
-                cost = priceTokens(model, price, 0);
+    if (sessions.length) {
+      await Promise.all([readSessions(), readSessions()]);
+      if (!signal.aborted) await index?.flush();
+    }
+    return (report, sessionsKnownFrom) => {
+      for (const kind of sections) {
+        for (const row of report[kind]) {
+          for (const agent of row.agents ?? [row]) {
+            if (agent.agent === "antigravity") continue;
+            for (const model of agent.modelBreakdowns) {
+              const gpt = gpt62Price(catalog, model.modelName);
+              const measured =
+                agent.agent === "codex" && gpt
+                  ? tallies[kind].get(
+                      JSON.stringify([row.period, model.modelName]),
+                    )
+                  : undefined;
+              let cost = model.cost;
+              if (measured && sameTokens(measured, model)) {
+                cost = measured.cost;
+              } else {
+                const missingSessions = sessionsKnownFrom && kind === "daily" && row.period < sessionsKnownFrom;
+                if (missingSessions && agent.agent === "codex" && gpt) {
+                  model.costPending = true;
+                  continue;
+                }
+                const price = gpt ?? findModelPrice(catalog, model.modelName);
+                // ccusage prices context tiers and DeepSeek's timestamped rates from its own request data.
+                const flat = price?.context.length === 0 && !/deepseek-v4-(flash|pro)/i.test(model.modelName);
+                if (price && (flat || (model.cost === 0 && (gpt || model.missingPricing)))) {
+                  cost = priceTokens(model, price, 0);
+                }
               }
+              if (model.costPending) delete model.costPending;
+              agent.totalCost += cost - model.cost;
+              model.cost = cost;
             }
-            agent.totalCost += cost - model.cost;
-            model.cost = cost;
           }
         }
       }
-    }
+    };
   };
 }

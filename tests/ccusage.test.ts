@@ -33,7 +33,7 @@ test("replaces the recent window and reconciles older days after seven days", as
   const history = createUsageHistory("Asia/Hong_Kong", new AbortController().signal, async (kind, _tz, _signal, since, until) => {
     assert.equal(kind, "daily");
     bounds.push([since, until]);
-    if (until) return [row("2026-10-31", bounds.length === 2 ? 1 : 12)];
+    if (until) return [row("2025-11-30", 123), row("2026-10-31", bounds.length === 2 ? 1 : 12)];
     if (since === "2026-11-08") return [];
     return bounds.length === 1 ? [row("2026-11-01", 3), row("2026-11-02", 5)] : [row("2026-11-02", 8)];
   });
@@ -43,8 +43,8 @@ test("replaces the recent window and reconciles older days after seven days", as
   t.mock.timers.tick(7 * 24 * 3_600_000);
   assert.deepEqual(await history.readDays("2026-11-09"), [row("2026-10-31", 12)]);
   assert.deepEqual(bounds, [
-    ["2026-11-01", undefined], [undefined, "2026-10-31"], ["2026-11-01", undefined],
-    ["2026-11-08", undefined], [undefined, "2026-11-07"],
+    ["2026-11-01", undefined], ["2025-12-01", "2026-10-31"], ["2026-11-01", undefined],
+    ["2026-11-08", undefined], ["2025-12-01", "2026-11-07"],
   ]);
 });
 
@@ -112,35 +112,78 @@ async function complete(cache: ReportCache) {
 }
 
 test("report and session RPCs return during a slow cold scan, then restore a disk snapshot and rescan only recent data", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: new Date("2026-11-20T08:00:00Z") });
   const root = await mkdtemp(path.join(os.tmpdir(), "paseo-usage-refresh-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const original = process.env.GEMINI_DIR;
   process.env.GEMINI_DIR = root;
   t.after(() => { if (original === undefined) delete process.env.GEMINI_DIR; else process.env.GEMINI_DIR = original; });
   const day = localToday(Intl.DateTimeFormat().resolvedOptions().timeZone);
-  let release!: () => void;
-  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const recentSessions = Promise.withResolvers<void>();
+  const olderDays = Promise.withResolvers<void>();
+  const olderSessions = Promise.withResolvers<void>();
   const calls: string[] = [];
-  const cache = createReportCache(async (kind, _tz, _signal, since, until) => {
-    calls.push(`${kind} ${since ? "recent" : "older"}`);
-    if (kind === "session" && until) {
-      await gate;
-      return [row("resumed", 400)];
+  const cache = createReportCache(async (kind, _tz, _signal, _since, until) => {
+    calls.push(`${kind} ${until ? "older" : "recent"}`);
+    if (kind === "daily" && until) {
+      await olderDays.promise;
+      const older = row("2026-11-13", 400);
+      older.modelBreakdowns[0].modelName = "gpt-6.2-sol";
+      return [{ ...older, agents: [older, row("2026-11-13", 30, "pi")] }];
     }
-    return until ? [] : [row(kind === "daily" ? day : "resumed", 80)];
+    if (kind === "session") {
+      await (until ? olderSessions : recentSessions).promise;
+      return [row("resumed", until ? 400 : 80)];
+    }
+    return [row(day, 80)];
   }, root);
-  t.after(() => cache.stop());
-  for (let i = 0; i < 400 && calls.length < 4; i++) {
-    await Promise.all([cache.read(), cache.sessions(), cache.read()]);
-    await delay(5);
+  t.after(() => { recentSessions.resolve(); olderDays.resolve(); olderSessions.resolve(); cache.stop(); });
+  async function stage(expected: "recentSessions" | "dailyHistory" | "sessionHistory", callCount: number) {
+    for (let i = 0; i < 400; i++) {
+      const [report] = await Promise.all([cache.read(), cache.sessions(), cache.read()]);
+      if (!("status" in report) && report.progress?.stage === expected && calls.length === callCount) return report;
+      await delay(5);
+    }
+    throw new Error("Stage did not become ready: " + expected);
   }
-  assert.deepEqual(calls, ["daily recent", "daily older", "session recent", "session older"]);
-  assert.deepEqual(await cache.read(), { status: "today", today: day, totalTokens: 86, refreshError: null });
+  const initial = await stage("recentSessions", 2);
+  assert.equal(initial.daily.at(-1)?.usage.totalTokens, 86);
+  assert.equal(initial.daily.at(-1)?.usage.cost, 8);
+  assert.equal(initial.historyPending, true);
+  assert.equal(initial.daily.length, 2);
+  assert.deepEqual(initial.weekly, []);
+  assert.deepEqual(initial.monthly, []);
   assert.deepEqual(await cache.sessions(), []);
-  release();
+  recentSessions.resolve();
+  const recent = await stage("dailyHistory", 3);
+  assert.deepEqual(recent.daily, initial.daily);
+  assert.equal(recent.sessionsPending, true);
+  const storeDuringScan = createUsageStore(recent.timezone, root);
+  assert.deepEqual((await storeDuringScan.readReport())?.daily, recent.daily);
+  olderDays.resolve();
+  const calendar = await stage("sessionHistory", 4);
+  assert.equal(calendar.historyPending, undefined);
+  assert.equal(calendar.sessionsPending, true);
+  assert.equal(calendar.daily.length, 30);
+  assert.equal(calendar.weekly.length, 12);
+  assert.equal(calendar.monthly.length, 12);
+  const oldDay = calendar.daily.find((r) => r.period === "2026-11-13")!;
+  assert.equal(oldDay.usage.cost, null);
+  assert.equal(oldDay.agents.find((a) => a.agent === "codex")?.models[0].usage.cost, null);
+  assert.equal(oldDay.agents.find((a) => a.agent === "pi")?.usage.cost, 3);
+  assert.equal(calendar.monthly.at(-1)?.usage.cost, null);
+  assert.equal(calendar.daily.at(-1)?.usage.cost, 8);
+  assert.deepEqual(calendar.recentSessions, []);
+  assert.deepEqual(await cache.sessions(), []);
+  assert.deepEqual(calls, ["daily recent", "session recent", "daily older", "session older"]);
+  olderSessions.resolve();
   const first = await complete(cache);
   assert.equal(first.recentSessions[0].usage.totalTokens, 492);
   assert.equal(first.daily.at(-1)?.usage.totalTokens, 86);
+  assert.equal(first.daily.find((r) => r.period === "2026-11-13")?.usage.cost, 43);
+  assert.equal(first.monthly.at(-1)?.usage.cost, 51);
+  assert.equal(first.sessionsPending, undefined);
+  assert.equal(first.progress, undefined);
   cache.stop();
   const compressed = path.join(root, "report.json.gz");
   assert.equal((await stat(compressed)).mode & 0o777, 0o600);
@@ -254,7 +297,9 @@ test("manual price updates reuse a finished or in-flight scan and return before 
     for (let i = 0; i < 400 && scans < 4; i++) { await cache.read(); await delay(5); }
     assert.equal(requests, 0);
     const result = await cache.updatePrices();
-    assert.ok("status" in result);
+    assert.ok(!("status" in result));
+    assert.equal(result.sessionsPending, true);
+    assert.equal(result.daily.at(-1)?.usage.totalTokens, 4006);
     finish();
     const first = await complete(cache);
     assert.equal(requests, 1);
@@ -270,6 +315,111 @@ test("manual price updates reuse a finished or in-flight scan and return before 
     cache.stop();
     if (oldCache === undefined) delete process.env.XDG_CACHE_HOME;
     else process.env.XDG_CACHE_HOME = oldCache;
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("manual refresh coalesces clicks, reuses archives, checks changed sessions and sends small unchanged replies", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: new Date("2026-11-20T08:00:00Z") });
+  const root = await mkdtemp(path.join(os.tmpdir(), "paseo-manual-usage-"));
+  const requests = t.mock.method(globalThis, "fetch", async () => { throw new Error("Unexpected price request"); });
+  const calls: string[] = [];
+  let recent = 80;
+  let paused = false;
+  const gate = Promise.withResolvers<void>();
+  const cache = createReportCache(async (kind, tz, _signal, _since, until) => {
+    calls.push(`${kind} ${until ? "archive" : "recent"}`);
+    if (paused && kind === "daily") await gate.promise;
+    if (until) return kind === "session" ? [row("resumed", 400)] : [];
+    return [row(kind === "session" ? "resumed" : localToday(tz), recent)];
+  }, root);
+  try {
+    const original = await complete(cache);
+    assert.ok(original.revision);
+    calls.length = 0;
+    recent = 100;
+    paused = true;
+    const replies = await Promise.all(Array.from({ length: 12 }, () => cache.read(true, original.revision)));
+    for (const reply of replies) {
+      assert.ok("status" in reply && reply.status === "unchanged" && reply.refreshing);
+      assert.ok(!("daily" in reply));
+    }
+    assert.deepEqual(calls, ["daily recent"]);
+    paused = false;
+    gate.resolve();
+    const updated = await complete(cache);
+    assert.equal(updated.daily.at(-1)?.usage.totalTokens, 106);
+    assert.equal(updated.recentSessions[0].usage.totalTokens, 512);
+    assert.notEqual(updated.revision, original.revision);
+    assert.deepEqual(calls, ["daily recent", "session recent"]);
+
+    calls.length = 0;
+    await cache.read(true);
+    const identical = await complete(cache);
+    assert.equal(identical.revision, updated.revision);
+    assert.deepEqual(calls, ["daily recent"]);
+    const unchanged = await cache.read(false, identical.revision);
+    assert.ok("status" in unchanged && unchanged.status === "unchanged" && !unchanged.refreshing);
+    assert.ok(JSON.stringify(unchanged).length * 10 < JSON.stringify(identical).length);
+    const newClient = await cache.read(false, "another-instance:1");
+    assert.ok(!("status" in newClient) && newClient.revision === identical.revision);
+
+    calls.length = 0;
+    t.mock.timers.tick(8 * 86_400_000);
+    await cache.read(true);
+    await complete(cache);
+    assert.deepEqual(calls, ["daily recent", "session recent"]);
+    t.mock.timers.tick(61_000);
+    await complete(cache);
+    assert.ok(calls.includes("daily archive") && calls.includes("session archive"));
+    assert.equal(requests.mock.callCount(), 0);
+  } finally {
+    gate.resolve();
+    cache.stop();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("a restart during session indexing keeps the calendar and publishes new activity before lifetime totals finish", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "paseo-incomplete-sessions-"));
+  t.mock.method(console, "error", () => {});
+  let count = 80;
+  const gate = Promise.withResolvers<void>();
+  const archiveStarted = Promise.withResolvers<void>();
+  const scan: Parameters<typeof createReportCache>[0] = async (kind, tz, _signal, _since, until) => {
+    if (kind === "session" && until) {
+      if (count === 80) throw new Error("session archive timed out");
+      archiveStarted.resolve();
+      await gate.promise;
+      return [row("resumed", 400)];
+    }
+    return until ? [] : [row(kind === "daily" ? localToday(tz) : "resumed", count)];
+  };
+  let cache = createReportCache(scan, root);
+  try {
+    const old = await complete(cache);
+    assert.equal(old.sessionRefreshError, "session archive timed out");
+    assert.equal(old.daily.length, 30);
+    cache.stop();
+
+    count = 100;
+    cache = createReportCache(scan, root);
+    const restored = await cache.read(true);
+    assert.ok(!("status" in restored));
+    assert.equal(restored.monthly.length, 12);
+    assert.equal(restored.daily.at(-1)?.usage.cost, 8);
+    await archiveStarted.promise;
+    const updated = await cache.read();
+    assert.ok(!("status" in updated));
+    assert.equal(updated.monthly.length, 12);
+    assert.equal(updated.daily.at(-1)?.usage.cost, 10);
+    assert.equal(updated.progress?.stage, "sessionHistory");
+    assert.deepEqual(updated.recentSessions, []);
+    gate.resolve();
+    assert.equal((await complete(cache)).recentSessions[0].usage.totalTokens, 512);
+  } finally {
+    gate.resolve();
+    cache.stop();
     await rm(root, { recursive: true, force: true });
   }
 });

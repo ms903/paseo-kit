@@ -210,7 +210,7 @@ export function agentSegments(
   if (!period) return [];
   return foldAgents(period.agents, order).map((agent) => ({
     key: agent.agent,
-    value: agent.usage[measure],
+    value: agent.usage[measure] ?? 0,
     swatch: agentSwatch(theme, order, agent.agent),
   }));
 }

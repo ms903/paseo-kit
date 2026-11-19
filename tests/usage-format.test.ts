@@ -5,6 +5,7 @@ import {
   formatPeriodLong,
   formatPeriodRange,
   formatPeriodShort,
+  formatScanProgress,
   formatTokens,
   reportTimeFormatter,
 } from "../plugins/ccusage-stats/client/format";
@@ -18,6 +19,7 @@ test("abbreviates token counts and displays USD amounts in full", () => {
   assert.equal(formatCost(1_238.47), "$1,238.47");
   assert.equal(formatCost(118.26), "$118.26");
   assert.equal(formatCost(0), "$0.00");
+  assert.equal(formatCost(null), "—");
   assert.equal(formatCost(0.001), "<$0.01");
 });
 
@@ -35,4 +37,10 @@ test("shows the report's exact calendar dates and inclusive date ranges", () => 
   );
   const utc = Date.UTC(2026, 10, 18, 16, 17);
   assert.equal(reportTimeFormatter("Asia/Hong_Kong").format(utc), "Nov 19, 2026, 00:17");
+});
+
+test("describes the active usage scan and its elapsed time", () => {
+  assert.equal(formatScanProgress({ stage: "recentSessions", elapsedSeconds: 2 }), "Reading recent sessions…");
+  assert.equal(formatScanProgress({ stage: "dailyHistory", elapsedSeconds: 19 }), "Reading daily history · 19s");
+  assert.equal(formatScanProgress({ stage: "sessionHistory", elapsedSeconds: 71 }), "Reading session history · 1m 11s");
 });

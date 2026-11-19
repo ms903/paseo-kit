@@ -90,7 +90,7 @@ export function createUsageStore(timezone: string, directory = path.join(paseoHo
 
   function contentOf(report: UsageReport): string {
     const { today, timezone, agents, daily, weekly, monthly, recentSessions, sessionRefreshError } = report;
-    const values = [today, timezone, agents, daily, weekly, monthly, recentSessions, sessionRefreshError];
+    const values = [today, timezone, agents, daily, weekly, monthly, recentSessions, sessionRefreshError, report.historyPending, report.sessionsPending];
     return createHash("sha256").update(JSON.stringify(values)).digest("hex");
   }
 
@@ -155,7 +155,8 @@ export function createUsageStore(timezone: string, directory = path.join(paseoHo
     },
     async readReport() {
       const report = await read("report.json.gz", REPORT_LIMIT, usageReportSchema);
-      if (!report || report.timezone !== timezone || !report.daily.length || !report.weekly.length || !report.monthly.length) return;
+      if (!report || report.timezone !== timezone || !report.daily.length) return;
+      if (!report.historyPending && (!report.weekly.length || !report.monthly.length)) return;
       lastContent = contentOf(report);
       return report;
     },

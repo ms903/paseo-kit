@@ -184,10 +184,11 @@ test("prices GPT-6.2 per request, including cached tokens, long context and reco
         .join("\n") + "\n",
     );
     const cache = path.join(root, "price-buckets");
-    const applyPrices = createReportPricer([root], createUsageStore("UTC", cache));
+    const preparePrices = createReportPricer([root], createUsageStore("UTC", cache));
     const signal = new AbortController().signal;
     const report = sampleReport(session);
-    await applyPrices(report, "UTC", EMPTY_CATALOG, signal);
+    const applyPrices = await preparePrices(report.session, "UTC", EMPTY_CATALOG, signal);
+    applyPrices(report);
     for (const rows of [
       report.daily,
       report.weekly,
@@ -205,8 +206,8 @@ test("prices GPT-6.2 per request, including cached tokens, long context and reco
     const refreshed = sampleReport(session);
     let reads = 0;
     const restarted = createReportPricer([root], createUsageStore("UTC", cache), async () => { reads++; return []; });
-    await restarted(
-      refreshed,
+    const applyUpdated = await restarted(
+      refreshed.session,
       "UTC",
       parsePriceCatalog({ ...pricingPayload(3), openai: { models: {
         ...pricingPayload(3).openai.models,
@@ -214,13 +215,14 @@ test("prices GPT-6.2 per request, including cached tokens, long context and reco
       } } }),
       signal,
     );
+    applyUpdated(refreshed);
     assert.ok(
       Math.abs(refreshed.session[0].modelBreakdowns[0].cost - 2.373) < 1e-10,
     );
     assert.ok(Math.abs(refreshed.session[0].modelBreakdowns[2].cost - 0.0008) < 1e-10);
     assert.equal(reads, 0);
     await writeFile(file, "\n", { flag: "a" });
-    await restarted(sampleReport(session), "UTC", EMPTY_CATALOG, signal);
+    await restarted(sampleReport(session).session, "UTC", EMPTY_CATALOG, signal);
     assert.equal(reads, 1);
     assert.equal(
       refreshed.session[0].totalTokens,

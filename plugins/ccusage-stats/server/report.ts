@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { createAntigravityReport, mergeAntigravity } from "./antigravity";
 import {
   EMPTY_USAGE,
@@ -7,8 +8,9 @@ import {
   type Usage,
   type UsagePeriod,
   type UsageReport,
+  type UsageRead,
   type ReportResponse,
-  type TodayPreview,
+  type ScanProgress,
 } from "../shared/usage";
 import {
   runCcusage,
@@ -17,9 +19,9 @@ import {
   type RawReport,
   type RawRow,
 } from "./ccusage";
-import { createReportPricer } from "./codex-prices";
+import { createReportPricer, type ReportPrices } from "./codex-prices";
 import { createPriceCatalog, type PriceCatalog } from "./price-catalog";
-import { createUsageHistory } from "./usage-history";
+import { createUsageHistory, oldestReportDay, REPORT_MONTHS, type RecentSessions, type RefreshMode } from "./usage-history";
 import { rollupDays } from "./usage-rows";
 import { createUsageStore } from "./usage-store";
 
@@ -29,19 +31,20 @@ const FRESH_MS = 60_000;
 const INVALIDATE_DEBOUNCE_MS = 4_000;
 // Only refresh eagerly after a turn when someone looked at the numbers recently.
 const ACTIVE_READER_MS = 15 * 60_000;
-const SERIES_LENGTH = { daily: 30, weekly: 12, monthly: 12 } as const;
+const SERIES_LENGTH = { daily: 30, weekly: 12, monthly: REPORT_MONTHS } as const;
 const RECENT_SESSIONS = 12;
 const DAY_MS = 86_400_000;
 
 function usageOf(row: RawAgentRow | RawModel, total?: number, cost?: number): Usage {
   const sum = row.inputTokens + row.outputTokens + row.cacheCreationTokens + row.cacheReadTokens;
+  const pending = "modelName" in row ? row.costPending : row.modelBreakdowns.some((model) => model.costPending);
   return {
     inputTokens: row.inputTokens,
     outputTokens: row.outputTokens,
     cacheCreationTokens: row.cacheCreationTokens,
     cacheReadTokens: row.cacheReadTokens,
     totalTokens: total ?? sum,
-    cost: cost ?? ("cost" in row ? row.cost : 0),
+    cost: pending ? null : cost ?? ("cost" in row ? row.cost : 0),
   };
 }
 
@@ -65,11 +68,10 @@ function agentsOf(row: RawRow): AgentUsage[] {
 }
 
 function periodOf(row: RawRow): UsagePeriod {
-  return {
-    period: row.period,
-    usage: usageOf(row, row.totalTokens, row.totalCost),
-    agents: agentsOf(row),
-  };
+  const agents = agentsOf(row);
+  const usage = usageOf(row, row.totalTokens, row.totalCost);
+  if (agents.some((agent) => agent.usage.cost === null)) usage.cost = null;
+  return { period: row.period, usage, agents };
 }
 
 function sessionOf(row: RawRow): SessionUsage {
@@ -123,17 +125,18 @@ function periodKeys(kind: keyof typeof SERIES_LENGTH, today: string): string[] {
   return keys;
 }
 
-function series(kind: keyof typeof SERIES_LENGTH, rows: RawRow[], today: string): UsagePeriod[] {
+function series(kind: keyof typeof SERIES_LENGTH, rows: RawRow[], today: string, from?: string): UsagePeriod[] {
   const byPeriod = new Map(rows.map((row) => [row.period, row]));
-  return periodKeys(kind, today).map((key) => {
+  const keys = periodKeys(kind, today).filter((key) => !from || (kind === "monthly" ? key + "-01" : key) >= from);
+  return keys.map((key) => {
     const row = byPeriod.get(key);
     return row ? periodOf(row) : { period: key, usage: EMPTY_USAGE, agents: [] };
   });
 }
 
-function agentOrder(raw: RawReport): string[] {
+function agentOrder(rows: RawRow[]): string[] {
   const totals = new Map<string, number>();
-  for (const row of raw.monthly) {
+  for (const row of rows) {
     for (const agent of row.agents ?? [row]) {
       totals.set(agent.agent, (totals.get(agent.agent) ?? 0) + agent.totalTokens);
     }
@@ -144,15 +147,16 @@ function agentOrder(raw: RawReport): string[] {
     .map(([agent]) => agent);
 }
 
-function buildReport(raw: RawReport, timezone: string, today: string, generatedAt: number, sessions: SessionUsage[]): UsageReport {
+function buildReport(raw: RawReport, timezone: string, today: string, generatedAt: number, sessions: SessionUsage[], from?: string): UsageReport {
+  const firstDay = from ?? oldestReportDay(today);
   return {
     generatedAt,
     today,
     timezone,
-    agents: agentOrder(raw),
-    daily: series("daily", raw.daily, today),
-    weekly: series("weekly", raw.weekly, today),
-    monthly: series("monthly", raw.monthly, today),
+    agents: agentOrder(raw.daily.filter((row) => row.period >= firstDay)),
+    daily: series("daily", raw.daily, today, from),
+    weekly: series("weekly", raw.weekly, today, from),
+    monthly: series("monthly", raw.monthly, today, from),
     recentSessions: [...sessions]
       .sort((a, b) => (b.lastActivity ?? "").localeCompare(a.lastActivity ?? ""))
       .slice(0, RECENT_SESSIONS),
@@ -166,7 +170,8 @@ interface Snapshot {
 }
 
 export interface ReportCache {
-  read(retry?: boolean): Promise<ReportResponse>;
+  read(refresh?: boolean): Promise<ReportResponse>;
+  read(refresh: boolean | undefined, knownRevision: string | undefined): Promise<UsageRead>;
   updatePrices(): Promise<ReportResponse>;
   sessions(): Promise<SessionUsage[]>;
   invalidate(): void;
@@ -179,11 +184,12 @@ export function createReportCache(scan = runCcusage, cacheDirectory?: string): R
   const { signal } = lifetime;
   const store = createUsageStore(timezone, cacheDirectory, signal);
   const priceCatalog = createPriceCatalog(signal);
-  const applyPrices = createReportPricer(undefined, store);
+  const preparePrices = createReportPricer(undefined, store);
   const readAntigravity = createAntigravityReport(store);
   const history = createUsageHistory(timezone, signal, scan, store);
   let snapshot: Snapshot | undefined;
-  let preview: TodayPreview | undefined;
+  const instance = randomUUID();
+  let version = 0;
   let rendered: { history: string; antigravity: RawReport; catalog: PriceCatalog } | undefined;
   let startup: Promise<void> | undefined;
   let restored = false;
@@ -195,35 +201,79 @@ export function createReportCache(scan = runCcusage, cacheDirectory?: string): R
   let debounce: ReturnType<typeof setTimeout> | null = null;
   let priceUpdate: Promise<ReportResponse> | null = null;
   let pricesChanged = false;
+  let manualRequested = false;
+  let stage: { name: ScanProgress["stage"]; start: number } | undefined;
 
-  async function refresh(reprice: boolean) {
+  function startStage(name: ScanProgress["stage"]) {
+    stage = { name, start: Date.now() };
+  }
+
+  async function publish(
+    today: string, daily: RawRow[], lifetimeSessions: RawRow[], antigravity: RawReport, prices: ReportPrices,
+    options: { from?: string; sessionsKnownFrom?: string; sessionError?: string | null } = {},
+  ) {
+    const sessionsPending = options.sessionsKnownFrom !== undefined;
+    const base: RawReport = { daily, weekly: [], monthly: [], session: lifetimeSessions };
+    prices(base, options.sessionsKnownFrom);
+    if (signal.aborted) throw new Error("Usage scan cancelled");
+    base.weekly = rollupDays(daily, "weekly");
+    base.monthly = rollupDays(daily, "monthly");
+    const raw = mergeAntigravity(base, antigravity);
+    const sessions = raw.session.map(sessionOf);
+    if ((sessionsPending || options.sessionError) && !base.session.length && snapshot) {
+      sessions.push(...snapshot.sessions.filter((row) => row.agent !== "antigravity"));
+    }
+    const report = buildReport(raw, timezone, today, Date.now(), sessions, options.from);
+    if (options.from) report.historyPending = true;
+    if (sessionsPending) report.sessionsPending = true;
+    report.sessionRefreshError = options.sessionError ?? null;
+    version++;
+    snapshot = { report, sessions };
+    await store.saveReport(report);
+  }
+
+  async function refresh(mode: RefreshMode) {
     const start = Date.now();
     const today = localToday(timezone);
     try {
       const prices = priceCatalog.read();
-      let nativeToday: number | undefined;
-      let agyToday: number | undefined;
-      function publishToday() {
-        if (!snapshot && nativeToday !== undefined && agyToday !== undefined && !signal.aborted) {
-          preview = { status: "today", today, totalTokens: nativeToday + agyToday, refreshError: null };
+      const inputs = Promise.all([readAntigravity(timezone, signal, undefined, prices), prices]);
+      const needsCalendar = !snapshot || !!snapshot.report.historyPending;
+      const needsSessions = needsCalendar || (!!snapshot?.report.sessionsPending && (!rendered || mode === "manual"));
+      const tomorrow = dayKey(keyMs(today) + DAY_MS);
+      // A bounded session row can identify a pricing source, but only a joined lifetime row belongs in the session list.
+      let recentSessions: RecentSessions | undefined;
+      let recentPrices: ReportPrices | undefined;
+      const days = history.readDays(today, needsSessions ? async (recent, since) => {
+        const [antigravity, catalog] = await inputs;
+        startStage("recentSessions");
+        if (!snapshot) {
+          const prices = await preparePrices([], timezone, catalog, signal, ["daily"]);
+          await publish(today, structuredClone(recent), [], antigravity, prices, { from: since, sessionsKnownFrom: tomorrow });
         }
+        recentSessions = await history.prepareSessions(today, mode);
+        const window = recentSessions.window;
+        recentPrices = await preparePrices(window?.recent ?? [], timezone, catalog, signal, ["daily"]);
+        if (needsCalendar) {
+          await publish(today, structuredClone(recent), [], antigravity, recentPrices, {
+            from: since, sessionsKnownFrom: window?.since ?? tomorrow, sessionError: recentSessions.error?.message,
+          });
+        }
+        startStage("dailyHistory");
+      } : undefined, mode);
+      const reads = [days, inputs] as const;
+      const [daily, pricing] = await Promise.all(reads).finally(() => Promise.allSettled(reads));
+      let [antigravity, catalog] = pricing;
+      if (recentPrices) {
+        const window = recentSessions?.window;
+        await publish(today, structuredClone(daily), [], antigravity, recentPrices, {
+          sessionsKnownFrom: window?.since ?? tomorrow, sessionError: recentSessions?.error?.message,
+        });
       }
-      const scans = [
-        history.readDays(today, (recent) => {
-          const row = recent.find((day) => day.period === today);
-          nativeToday = (row?.agents ?? (row ? [row] : []))
-            .reduce((total, agent) => total + (/antigravity/i.test(agent.agent) ? 0 : agent.totalTokens), 0);
-          publishToday();
-        }, reprice),
-        readAntigravity(timezone, signal, undefined, prices).then((data) => {
-          agyToday = data.daily.find((day) => day.period === today)?.totalTokens ?? 0;
-          publishToday();
-          return data;
-        }),
-        prices,
-      ] as const;
-      let [daily, antigravity, catalog] = await Promise.all(scans).finally(() => Promise.allSettled(scans));
-      const session = await history.readSessions(today, reprice);
+      if (snapshot?.report.sessionsPending) {
+        startStage("sessionHistory");
+      }
+      const session = await history.readSessions(today, mode, recentSessions);
       if (pricesChanged) {
         pricesChanged = false;
         catalog = await priceCatalog.read();
@@ -231,26 +281,19 @@ export function createReportCache(scan = runCcusage, cacheDirectory?: string): R
       }
       const unchanged = rendered?.history === history.revision && rendered.antigravity === antigravity
         && rendered.catalog === catalog && snapshot?.report.today === today;
-      if (unchanged && snapshot) {
+      if (unchanged && snapshot && !session.error) {
         snapshot.report = { ...snapshot.report, generatedAt: Date.now() };
       } else {
-        const base: RawReport = { daily, weekly: [], monthly: [], session: session.rows };
-        await applyPrices(base, timezone, catalog, signal);
-        if (signal.aborted) throw new Error("Usage scan cancelled");
-        base.weekly = rollupDays(base.daily, "weekly");
-        base.monthly = rollupDays(base.daily, "monthly");
-        const raw = mergeAntigravity(base, antigravity);
-        const sessions = raw.session.map(sessionOf);
-        if (session.error && !base.session.length && snapshot) {
-          sessions.push(...snapshot.sessions.filter((row) => row.agent !== "antigravity"));
-        }
-        const report = buildReport(raw, timezone, today, Date.now(), sessions);
-        report.sessionRefreshError = session.error;
-        snapshot = { report, sessions };
+        const rows = session.rows;
+        const incomplete = !!session.error && !rows.length;
+        const source = incomplete ? session.pricingWindow?.recent ?? [] : rows;
+        const prices = await preparePrices(source, timezone, catalog, signal, ["daily", "session"]);
+        await publish(today, daily, rows, antigravity, prices, {
+          sessionError: session.error,
+          sessionsKnownFrom: incomplete ? session.pricingWindow?.since ?? tomorrow : undefined,
+        });
         rendered = { history: history.revision, antigravity, catalog };
-        await store.saveReport(report);
       }
-      preview = undefined;
       failures = 0;
       refreshError = null;
       nextRefreshAt = today === localToday(timezone)
@@ -264,6 +307,7 @@ export function createReportCache(scan = runCcusage, cacheDirectory?: string): R
         console.error(`[ccusage-stats] ${refreshError}`);
       }
     } finally {
+      stage = undefined;
       running = false;
       if (pricesChanged) {
         nextRefreshAt = 0;
@@ -275,9 +319,10 @@ export function createReportCache(scan = runCcusage, cacheDirectory?: string): R
   function schedule() {
     if (!restored || running || signal.aborted || Date.now() < nextRefreshAt) return;
     running = true;
-    const reprice = pricesChanged;
+    const mode = manualRequested ? "manual" : pricesChanged ? "prices" : "auto";
+    manualRequested = false;
     pricesChanged = false;
-    void refresh(reprice);
+    void refresh(mode);
   }
 
   async function current() {
@@ -298,11 +343,20 @@ export function createReportCache(scan = runCcusage, cacheDirectory?: string): R
     schedule();
   }
 
-  async function read(retry = false): Promise<ReportResponse> {
-    if (retry && refreshError) nextRefreshAt = 0;
+  function read(force?: boolean): Promise<ReportResponse>;
+  function read(force: boolean | undefined, knownRevision: string | undefined): Promise<UsageRead>;
+  async function read(force = false, knownRevision?: string): Promise<UsageRead> {
+    if (force && !running) {
+      nextRefreshAt = 0;
+      manualRequested = true;
+    }
     await current();
-    if (snapshot) return { ...snapshot.report, refreshError, refreshing: running };
-    if (preview) return { ...preview, refreshError };
+    const progress = stage && { stage: stage.name, elapsedSeconds: Math.max(0, Math.floor((Date.now() - stage.start) / 1000)) };
+    if (snapshot) {
+      const revision = `${instance}:${version}`;
+      const status = { revision, generatedAt: snapshot.report.generatedAt, refreshing: running, refreshError, progress };
+      return knownRevision === revision ? { status: "unchanged", ...status } : { ...snapshot.report, ...status };
+    }
     if (refreshError && !running) throw new Error(refreshError);
     return { status: "loading" };
   }

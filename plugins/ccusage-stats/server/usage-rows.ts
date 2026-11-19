@@ -27,6 +27,7 @@ function addModel(models: RawModel[], model: RawModel): void {
   for (const key of tokenFields) existing[key] += model[key];
   existing.cost += model.cost;
   if (model.missingPricing) existing.missingPricing = true;
+  if (model.costPending) existing.costPending = true;
 }
 
 export function addModelUsage(row: RawAgentRow, model: RawModel): void {

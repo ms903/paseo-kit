@@ -11,6 +11,7 @@ import {
   formatPercent,
   formatPeriodLong,
   formatPeriodRange,
+  formatScanProgress,
   formatTokens,
 } from "./format";
 
@@ -28,7 +29,7 @@ export function TodayUsage({ theme, preview }: { theme: PluginTheme; preview: To
         {formatTokens(preview.totalTokens)} tokens
       </Text>
       <Text style={{ fontSize: FONT.body, color: preview.refreshError ? theme.colors.statusWarning : theme.colors.foregroundMuted }}>
-        {preview.refreshError ?? "Loading usage history…"}
+        {preview.refreshError ?? (preview.progress ? formatScanProgress(preview.progress) : "Loading usage history…")}
       </Text>
     </View>
   );

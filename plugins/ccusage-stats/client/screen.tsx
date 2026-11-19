@@ -12,12 +12,13 @@ import {
   agentSwatch, SESSION_USAGE_KEY, USAGE_REPORT_KEY, useUsageReport, type UsageReport,
 } from "./data";
 import {
-  agentLabel, formatCost, formatPercent, formatPeriodLong, formatPeriodRange, formatTokens,
+  agentLabel, formatCost, formatPercent, formatPeriodLong, formatPeriodRange, formatScanProgress, formatTokens,
   reportTimeFormatter, shortSessionId,
 } from "./format";
 import {
   AgentList, Composition, FONT, TodayUsage, TokenChange, UsageAmounts, UsageTableHeader, usageColumns,
 } from "./summary";
+import { RefreshUsageButton } from "./refresh";
 
 type HoverState = PressableStateCallbackType & { hovered?: boolean };
 
@@ -76,7 +77,7 @@ function PeriodOverview({
   narrow: boolean;
 }) {
   const { usage } = period;
-  const perMillion = usage.totalTokens > 0 ? usage.cost / (usage.totalTokens / 1_000_000) : 0;
+  const perMillion = usage.cost !== null && usage.totalTokens > 0 ? usage.cost / (usage.totalTokens / 1_000_000) : null;
   const muted = { fontSize: FONT.body, color: theme.colors.foregroundMuted };
   const value: TextStyle = {
     fontSize: narrow ? 28 : 36,
@@ -131,7 +132,7 @@ function PeriodOverview({
         <View style={{ flexGrow: 1, flexBasis: 165, gap: 3 }}>
           <Text style={muted}>Cost</Text>
           <Text style={value}>{formatCost(usage.cost)}</Text>
-          <Text style={[muted, { fontSize: FONT.caption }]}>{formatCost(perMillion)} per 1M tokens</Text>
+          {perMillion !== null ? <Text style={[muted, { fontSize: FONT.caption }]}>{formatCost(perMillion)} per 1M tokens</Text> : null}
         </View>
       </View>
     </>
@@ -197,18 +198,20 @@ function Body({
   theme,
   compact,
   report,
-  priceAction,
+  actions,
   initialKind,
   initialPeriod,
 }: {
   theme: PluginTheme;
   compact: boolean;
   report: UsageReport;
-  priceAction: ReactNode;
+  actions: ReactNode;
   initialKind: PeriodKind;
   initialPeriod?: string;
 }) {
-  const [kind, setKind] = useState(initialKind);
+  const [requestedKind, setKind] = useState(initialKind);
+  const kind = report[requestedKind].length ? requestedKind : "daily";
+  const options = PERIOD_OPTIONS.filter(({ value }) => report[value].length > 0);
   const [pickedKey, setPickedKey] = useState<string | null>(initialPeriod ?? null);
   const [width, setWidth] = useState(0);
   const { today, timezone } = report;
@@ -243,12 +246,15 @@ function Body({
   return (
     <View onLayout={(event) => setWidth(event.nativeEvent.layout.width)} style={{ gap: 14 }}>
       <View style={{ flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
-        <Segmented theme={theme} options={PERIOD_OPTIONS} value={kind} onChange={changeKind} accessibilityLabel="Period" />
+        {options.length > 1 ? <Segmented theme={theme} options={options} value={kind} onChange={changeKind} accessibilityLabel="Period" /> : null}
         <View style={{ flex: 1 }} />
         {narrow ? null : updated}
-        {priceAction}
+        {actions}
       </View>
       {narrow ? updated : null}
+      {report.progress && !report.refreshError ? (
+        <Text style={{ fontSize: FONT.caption, color: theme.colors.foregroundMuted }}>{formatScanProgress(report.progress)}</Text>
+      ) : null}
       {report.refreshError ? (
         <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
           <Icon name="TriangleAlert" size={14} color={theme.colors.statusWarning} />
@@ -309,13 +315,15 @@ function Body({
         </>
       ) : null}
 
-      <RecentSessions theme={theme} report={report} clock={clock} narrow={narrow} />
+      {report.recentSessions.length > 0 || report.sessionRefreshError || !report.sessionsPending ? (
+        <RecentSessions theme={theme} report={report} clock={clock} narrow={narrow} />
+      ) : null}
     </View>
   );
 }
 
 export function UsageScreen({ theme, host, layout, params }: PluginScreenProps) {
-  const { data, error, isPending, preview, retryReport, isRefetching } = useUsageReport(host.id);
+  const { data, error, isPending, preview } = useUsageReport(host.id);
   const updatePrices = useRpc(updatePricesRpc);
   const queryClient = useQueryClient();
   const toast = useToast();
@@ -331,24 +339,27 @@ export function UsageScreen({ theme, host, layout, params }: PluginScreenProps) 
     },
     onError: () => toast.error("Could not update prices"),
   });
-  const priceAction = (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityState={{ busy: priceUpdate.isPending, disabled: priceUpdate.isPending }}
-      disabled={priceUpdate.isPending}
-      onPress={() => priceUpdate.mutate(host.id)}
-      style={({ hovered, pressed }: HoverState) => ({
-        alignSelf: "flex-end", flexDirection: "row", alignItems: "center", gap: 6,
-        minHeight: 34, paddingHorizontal: 10, borderRadius: 7,
-        borderWidth: 1, borderColor: theme.colors.border,
-        backgroundColor: hovered || pressed ? theme.colors.surface2 : theme.colors.surface1,
-      })}
-    >
-      <Icon name="RefreshCw" size={14} color={theme.colors.foregroundMuted} />
-      <Text style={{ fontSize: FONT.body, color: theme.colors.foreground }}>
-        {priceUpdate.isPending ? "Updating prices…" : "Update prices"}
-      </Text>
-    </Pressable>
+  const actions = (
+    <View style={{ alignSelf: "flex-end", flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
+      <RefreshUsageButton theme={theme} hostId={host.id} refreshing={!error && (isPending || !!data?.refreshing)} />
+      <Pressable
+        accessibilityRole="button"
+        accessibilityState={{ busy: priceUpdate.isPending, disabled: priceUpdate.isPending }}
+        disabled={priceUpdate.isPending}
+        onPress={() => priceUpdate.mutate(host.id)}
+        style={({ hovered, pressed }: HoverState) => ({
+          alignSelf: "flex-end", flexDirection: "row", alignItems: "center", gap: 6,
+          minHeight: 34, paddingHorizontal: 10, borderRadius: 7,
+          borderWidth: 1, borderColor: theme.colors.border,
+          backgroundColor: hovered || pressed ? theme.colors.surface2 : theme.colors.surface1,
+        })}
+      >
+        <Icon name="RefreshCw" size={14} color={theme.colors.foregroundMuted} />
+        <Text style={{ fontSize: FONT.body, color: theme.colors.foreground }}>
+          {priceUpdate.isPending ? "Updating prices…" : "Update prices"}
+        </Text>
+      </Pressable>
+    </View>
   );
   return (
     <ScrollView
@@ -362,18 +373,18 @@ export function UsageScreen({ theme, host, layout, params }: PluginScreenProps) 
             theme={theme}
             compact={layout.compact}
             report={data}
-            priceAction={priceAction}
+            actions={actions}
             initialKind={initialKind}
             initialPeriod={params.period}
           />
         ) : preview ? (
           <>
-            {priceAction}
+            {actions}
             <Panel theme={theme}><TodayUsage theme={theme} preview={preview} /></Panel>
           </>
         ) : (
           <>
-            {priceAction}
+            {actions}
             <View style={{ gap: 12, paddingVertical: 48, alignItems: "center" }}>
               <Icon
                 name={isPending ? "Hourglass" : "CircleAlert"}
@@ -391,22 +402,6 @@ export function UsageScreen({ theme, host, layout, params }: PluginScreenProps) 
             </View>
           </>
         )}
-        {!data && (error || preview?.refreshError) ? (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Try again"
-            disabled={isRefetching}
-            onPress={() => void retryReport().catch(() => undefined)}
-            style={({ hovered }: HoverState) => ({
-              alignSelf: "center", paddingVertical: 6, paddingHorizontal: 12, borderRadius: 8,
-              backgroundColor: hovered ? theme.colors.surface1 : theme.colors.surface2,
-            })}
-          >
-            <Text style={{ fontSize: FONT.body, color: theme.colors.foreground }}>
-              {isRefetching ? "Trying…" : "Try again"}
-            </Text>
-          </Pressable>
-        ) : null}
       </View>
     </ScrollView>
   );

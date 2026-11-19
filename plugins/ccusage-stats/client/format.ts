@@ -1,4 +1,4 @@
-import type { PeriodKind } from "../shared/usage";
+import type { PeriodKind, ScanProgress } from "../shared/usage";
 
 const integer = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
 const usd = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
@@ -23,9 +23,24 @@ export function formatTokens(tokens: number): string {
   return "";
 }
 
-export function formatCost(cost: number): string {
+export function formatCost(cost: number | null): string {
+  if (cost === null) return "—";
   const value = Math.max(cost, 0);
   return value > 0 && value < 0.005 ? "<$0.01" : usd.format(value);
+}
+
+const stageLabels: Record<ScanProgress["stage"], string> = {
+  recentSessions: "Reading recent sessions",
+  dailyHistory: "Reading daily history",
+  sessionHistory: "Reading session history",
+};
+
+export function formatScanProgress({ stage, elapsedSeconds }: ScanProgress): string {
+  const label = stageLabels[stage];
+  if (elapsedSeconds < 5) return label + "…";
+  const minutes = Math.floor(elapsedSeconds / 60);
+  const seconds = elapsedSeconds % 60;
+  return minutes ? `${label} · ${minutes}m ${seconds}s` : `${label} · ${seconds}s`;
 }
 
 export function formatPercent(fraction: number): string {

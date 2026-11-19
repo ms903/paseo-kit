@@ -8,6 +8,7 @@ import {
   type AgentUsage,
   type Usage,
   type UsagePeriod,
+  type ReportResponse,
 } from "../shared/usage";
 
 const REPORT_REFRESH_MS = 30_000;
@@ -17,26 +18,49 @@ export const SESSION_USAGE_KEY = ["session-usage"] as const;
 
 export type { UsageReport } from "../shared/usage";
 
-export function useUsageReport(hostId: string) {
+export function useReadUsage(hostId: string) {
   const getReport = useRpc(usageReportRpc);
   const client = useQueryClient();
+  return async (refresh = false): Promise<ReportResponse> => {
+    const cached = client.getQueryData<ReportResponse>([...USAGE_REPORT_KEY, hostId]);
+    const previous = cached && !("status" in cached) ? cached : undefined;
+    const result = await getReport({ refresh, knownRevision: previous?.revision });
+    let report: ReportResponse;
+    if ("status" in result && result.status === "unchanged") {
+      if (!previous || previous.revision !== result.revision) throw new Error("Usage report revision mismatch");
+      report = {
+        ...previous, generatedAt: result.generatedAt, refreshing: result.refreshing,
+        refreshError: result.refreshError, progress: result.progress,
+      };
+    } else {
+      report = result;
+    }
+    if (cached && !("status" in report) && !report.sessionsPending && previous?.revision !== report.revision) {
+      void client.invalidateQueries({ queryKey: [...SESSION_USAGE_KEY, hostId] });
+    }
+    return report;
+  };
+}
+
+export function useUsageReport(hostId: string) {
+  const read = useReadUsage(hostId);
   const queryKey = [...USAGE_REPORT_KEY, hostId];
   const query = useQuery({
     queryKey,
-    queryFn: () => getReport({}),
+    queryFn: () => read(),
     retry: false,
-    refetchInterval: ({ state: { data } }) => {
-      if (!data) return REPORT_REFRESH_MS;
+    refetchInterval: ({ state: { data, error } }) => {
+      if (error || !data) return REPORT_REFRESH_MS;
       if ("status" in data) return data.status === "today" && data.refreshError ? REPORT_REFRESH_MS : 2_000;
-      return data.refreshing ? 10_000 : REPORT_REFRESH_MS;
+      if (!data.refreshing) return REPORT_REFRESH_MS;
+      return (data.progress?.elapsedSeconds ?? 0) >= 15 ? 10_000 : 3_000;
     },
     staleTime: REPORT_REFRESH_MS / 2,
   });
   const response = query.data;
   const data = response && !("status" in response) ? response : undefined;
   const preview = response && "status" in response && response.status === "today" ? response : undefined;
-  const retryReport = () => client.fetchQuery({ queryKey, queryFn: () => getReport({ retry: true }), retry: false, staleTime: 0 });
-  return { ...query, data, preview, retryReport, isPending: !data && !query.error && !preview?.refreshError };
+  return { ...query, data, preview, isPending: !data && !query.error && !preview?.refreshError };
 }
 
 export function useSessionUsage(hostId: string, agentId: string) {
@@ -88,8 +112,12 @@ function median(values: readonly number[]): number {
  * or a day with a single prompt, from moving it far. Cost rather than tokens, because cache reads
  * dominate token counts while costing next to nothing.
  */
-export function typicalDay(daily: readonly UsagePeriod[]): TypicalDay {
-  const costs = daily.slice(-TYPICAL_DAYS - 1, -1).map((day) => day.usage.cost);
+export function typicalDay(daily: readonly UsagePeriod[]): TypicalDay | null {
+  const costs: number[] = [];
+  for (const day of daily.slice(-TYPICAL_DAYS - 1, -1)) {
+    if (day.usage.cost === null) return null;
+    costs.push(day.usage.cost);
+  }
   const active = costs.filter((cost) => cost > 0);
   if (active.length === 0) {
     return { cost: DEFAULT_TYPICAL_COST, activeDays: 0, estimated: true, average: null };
@@ -140,7 +168,7 @@ function addUsage(a: Usage, b: Usage): Usage {
     cacheCreationTokens: a.cacheCreationTokens + b.cacheCreationTokens,
     cacheReadTokens: a.cacheReadTokens + b.cacheReadTokens,
     totalTokens: a.totalTokens + b.totalTokens,
-    cost: a.cost + b.cost,
+    cost: a.cost === null || b.cost === null ? null : a.cost + b.cost,
   };
 }
 
