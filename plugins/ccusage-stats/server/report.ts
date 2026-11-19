@@ -186,7 +186,10 @@ export function createReportCache(scan = runCcusage, cacheDirectory?: string): R
   const priceCatalog = createPriceCatalog(signal);
   const preparePrices = createReportPricer(undefined, store);
   const readAntigravity = createAntigravityReport(store);
-  const history = createUsageHistory(timezone, signal, scan, store);
+  const history = createUsageHistory(timezone, signal, scan, store, (kind, archived) => {
+    if (kind === "daily") startStage(archived ? "dailyHistory" : "recentUsage");
+    else startStage(archived ? "sessionHistory" : "recentSessions");
+  });
   let snapshot: Snapshot | undefined;
   const instance = randomUUID();
   let version = 0;
@@ -205,7 +208,7 @@ export function createReportCache(scan = runCcusage, cacheDirectory?: string): R
   let stage: { name: ScanProgress["stage"]; start: number } | undefined;
 
   function startStage(name: ScanProgress["stage"]) {
-    stage = { name, start: Date.now() };
+    if (stage?.name !== name) stage = { name, start: Date.now() };
   }
 
   async function publish(
@@ -237,6 +240,7 @@ export function createReportCache(scan = runCcusage, cacheDirectory?: string): R
     const start = Date.now();
     const today = localToday(timezone);
     const previousReads = history.dailyReads;
+    startStage(mode === "prices" ? "totals" : "recentUsage");
     try {
       const prices = priceCatalog.read();
       const inputs = Promise.all([readAntigravity(timezone, signal, undefined, prices), prices]);
@@ -261,7 +265,6 @@ export function createReportCache(scan = runCcusage, cacheDirectory?: string): R
             from: since, sessionsKnownFrom: window?.since ?? tomorrow, sessionError: recentSessions.error?.message,
           });
         }
-        startStage("dailyHistory");
       } : undefined, mode);
       const reads = [days, inputs] as const;
       const [daily, pricing] = await Promise.all(reads).finally(() => Promise.allSettled(reads));
@@ -271,9 +274,6 @@ export function createReportCache(scan = runCcusage, cacheDirectory?: string): R
         await publish(today, structuredClone(daily), [], antigravity, recentPrices, {
           sessionsKnownFrom: window?.since ?? tomorrow, sessionError: recentSessions?.error?.message,
         });
-      }
-      if (snapshot?.report.sessionsPending) {
-        startStage("sessionHistory");
       }
       const session = await history.readSessions(today, mode, recentSessions);
       if (pricesChanged) {
@@ -290,6 +290,7 @@ export function createReportCache(scan = runCcusage, cacheDirectory?: string): R
         snapshot.report = { ...snapshot.report, generatedAt, usageRefreshedAt };
         await store.saveRefreshTime(usageRefreshedAt);
       } else {
+        startStage("totals");
         const rows = session.rows;
         const incomplete = !!session.error && !rows.length;
         const source = incomplete ? session.pricingWindow?.recent ?? [] : rows;
@@ -364,7 +365,7 @@ export function createReportCache(scan = runCcusage, cacheDirectory?: string): R
       return knownRevision === revision ? { status: "unchanged", ...status } : { ...snapshot.report, ...status };
     }
     if (refreshError && !running) throw new Error(refreshError);
-    return { status: "loading" };
+    return { status: "loading", progress };
   }
 
   return {

@@ -35,7 +35,7 @@ const sessionSchema = z.object({
 });
 
 const progressSchema = z.object({
-  stage: z.enum(["recentSessions", "dailyHistory", "sessionHistory"]),
+  stage: z.enum(["recentUsage", "recentSessions", "dailyHistory", "sessionHistory", "totals"]),
   elapsedSeconds: z.number().nonnegative(),
 });
 export type ScanProgress = z.infer<typeof progressSchema>;
@@ -71,7 +71,7 @@ const previewSchema = z.object({
   refreshError: z.string().nullable(),
   progress: progressSchema.optional(),
 });
-const reportResponseSchema = z.union([usageReportSchema, previewSchema, z.object({ status: z.literal("loading") })]);
+const reportResponseSchema = z.union([usageReportSchema, previewSchema, z.object({ status: z.literal("loading"), progress: progressSchema.optional() })]);
 export type UsageReport = z.infer<typeof usageReportSchema>;
 export type TodayPreview = z.infer<typeof previewSchema>;
 export type ReportResponse = z.infer<typeof reportResponseSchema>;

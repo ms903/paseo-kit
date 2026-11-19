@@ -60,7 +60,7 @@ export function useUsageReport(hostId: string) {
   const response = query.data;
   const data = response && !("status" in response) ? response : undefined;
   const preview = response && "status" in response && response.status === "today" ? response : undefined;
-  return { ...query, data, preview, isPending: !data && !query.error && !preview?.refreshError };
+  return { ...query, data, preview, progress: response?.progress, isPending: !data && !query.error && !preview?.refreshError };
 }
 
 export function useSessionUsage(hostId: string, agentId: string) {
@@ -134,8 +134,12 @@ export function typicalDay(daily: readonly UsagePeriod[]): TypicalDay | null {
   };
 }
 
+// Okabe–Ito Color Universal Design palette.
+// https://jfly.uni-koeln.de/color/
+const AGENT_COLORS = ["#0072B2", "#D55E00", "#009E73", "#CC79A7"] as const;
+
 /** Named series before the rest fold into "Other". */
-export const MAX_NAMED_AGENTS = 4;
+export const MAX_NAMED_AGENTS = AGENT_COLORS.length;
 export const OTHER_AGENT = "other";
 
 export interface Swatch {
@@ -143,22 +147,10 @@ export interface Swatch {
   opacity: number;
 }
 
-/**
- * Agent identity colors. The theme offers one accent and neutrals; the status colors mean
- * health, not identity, so agents get accent and muted steps instead. The order comes from the
- * report (heaviest agent across all history first), so an agent keeps its color across every view, and
- * every swatch sits next to a text label.
- */
+/** Use the report-wide order so charts, legends and lists agree across periods. */
 export function agentSwatch(theme: PluginTheme, agents: readonly string[], agent: string): Swatch {
-  const steps: Swatch[] = [
-    { color: theme.colors.accent, opacity: 1 },
-    { color: theme.colors.accent, opacity: 0.5 },
-    { color: theme.colors.foregroundMuted, opacity: 0.9 },
-    { color: theme.colors.foregroundMuted, opacity: 0.45 },
-  ];
-  const index = agents.indexOf(agent);
-  if (index < 0 || index >= MAX_NAMED_AGENTS) return { color: theme.colors.border, opacity: 1 };
-  return steps[index] ?? { color: theme.colors.border, opacity: 1 };
+  const color = agent === OTHER_AGENT ? undefined : AGENT_COLORS[agents.indexOf(agent)];
+  return { color: color ?? theme.colors.foregroundMuted, opacity: 1 };
 }
 
 function addUsage(a: Usage, b: Usage): Usage {

@@ -217,7 +217,7 @@ export function agentSegments(
 
 /**
  * Stacked columns, one per period, agents bottom-up in legend order. The selected column is
- * full strength and the rest recede; pressing a column selects it.
+ * highlighted with a background; pressing a column selects it.
  */
 export function PeriodBars({
   theme,
@@ -298,7 +298,6 @@ export function PeriodBars({
                     height: Math.max(barHeight, 3), flexDirection: "column-reverse",
                     gap: barHeight > segments.length * 4 ? 1 : 0,
                     borderTopLeftRadius: 3, borderTopRightRadius: 3, overflow: "hidden",
-                    opacity: isSelected ? 1 : 0.65,
                   }}>
                     {segments.map((segment) => (
                       <View key={segment.key} style={{

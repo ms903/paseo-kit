@@ -1,9 +1,29 @@
 import type { PluginTheme } from "@getpaseo/plugin";
 import { Icon, useToast } from "@getpaseo/plugin/client/react-native";
 import { useIsMutating, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Pressable, Text, type PressableStateCallbackType } from "react-native";
-import type { ReportResponse } from "../shared/usage";
+import { Pressable, Text, View, type PressableStateCallbackType } from "react-native";
+import type { ReportResponse, ScanProgress } from "../shared/usage";
 import { USAGE_REPORT_KEY, useReadUsage } from "./data";
+import { formatScanProgress } from "./format";
+
+export function UsageRefreshStatus({ theme, progress }: {
+  theme: PluginTheme;
+  progress?: ScanProgress;
+}) {
+  return (
+    <View style={{
+      alignSelf: "flex-start", maxWidth: "100%", flexDirection: "row", alignItems: "center", gap: 6,
+      paddingHorizontal: 8, paddingVertical: 5, borderRadius: 7, borderWidth: 1,
+      borderColor: theme.colors.border, backgroundColor: theme.colors.surface1,
+    }}>
+      <Icon name="Hourglass" size={12} color={theme.colors.foregroundMuted} />
+      <Text style={{ flexShrink: 1, fontSize: 11, color: theme.colors.foreground }}>
+        {progress ? formatScanProgress(progress) : "Reading usage logs…"}
+      </Text>
+    </View>
+  );
+}
+
 
 export function RefreshUsageButton({ theme, hostId, refreshing, compact = false }: {
   theme: PluginTheme;

@@ -119,6 +119,7 @@ test("report and session RPCs return during a slow cold scan, then restore a dis
   process.env.GEMINI_DIR = root;
   t.after(() => { if (original === undefined) delete process.env.GEMINI_DIR; else process.env.GEMINI_DIR = original; });
   const day = localToday(Intl.DateTimeFormat().resolvedOptions().timeZone);
+  const recentDays = Promise.withResolvers<void>();
   const recentSessions = Promise.withResolvers<void>();
   const olderDays = Promise.withResolvers<void>();
   const olderSessions = Promise.withResolvers<void>();
@@ -135,9 +136,20 @@ test("report and session RPCs return during a slow cold scan, then restore a dis
       await (until ? olderSessions : recentSessions).promise;
       return [row("resumed", until ? 400 : 80)];
     }
+    await recentDays.promise;
     return [row(day, 80)];
   }, root);
-  t.after(() => { recentSessions.resolve(); olderDays.resolve(); olderSessions.resolve(); cache.stop(); });
+  t.after(() => {
+    recentDays.resolve();
+    recentSessions.resolve();
+    olderDays.resolve();
+    olderSessions.resolve();
+    cache.stop();
+  });
+  const loading = await cache.read();
+  assert.ok("status" in loading && loading.status === "loading");
+  assert.deepEqual(loading.progress, { stage: "recentUsage", elapsedSeconds: 0 });
+  recentDays.resolve();
   async function stage(expected: "recentSessions" | "dailyHistory" | "sessionHistory", callCount: number) {
     for (let i = 0; i < 400; i++) {
       const [report] = await Promise.all([cache.read(), cache.sessions(), cache.read()]);
@@ -343,8 +355,13 @@ test("manual refresh coalesces clicks, reuses archives, checks changed sessions 
     for (const reply of replies) {
       assert.ok("status" in reply && reply.status === "unchanged" && reply.refreshing);
       assert.ok(!("daily" in reply));
+      assert.deepEqual(reply.progress, { stage: "recentUsage", elapsedSeconds: 0 });
     }
     assert.deepEqual(calls, ["daily recent"]);
+    t.mock.timers.tick(12_000);
+    const inProgress = await cache.read(false, original.revision);
+    assert.ok("status" in inProgress && inProgress.status === "unchanged");
+    assert.deepEqual(inProgress.progress, { stage: "recentUsage", elapsedSeconds: 12 });
     paused = false;
     gate.resolve();
     const updated = await complete(cache);

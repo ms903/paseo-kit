@@ -12,13 +12,13 @@ import {
   agentSwatch, SESSION_USAGE_KEY, USAGE_REPORT_KEY, useUsageReport, type UsageReport,
 } from "./data";
 import {
-  agentLabel, formatCost, formatPercent, formatPeriodLong, formatPeriodRange, formatScanProgress, formatTokens,
+  agentLabel, formatCost, formatPercent, formatPeriodLong, formatPeriodRange, formatTokens,
   reportTimeFormatter, shortSessionId,
 } from "./format";
 import {
   AgentList, Composition, FONT, TodayUsage, TokenChange, UsageAmounts, UsageTableHeader, usageColumns,
 } from "./summary";
-import { RefreshUsageButton } from "./refresh";
+import { RefreshUsageButton, UsageRefreshStatus } from "./refresh";
 
 type HoverState = PressableStateCallbackType & { hovered?: boolean };
 
@@ -253,10 +253,8 @@ function Body({
         {actions}
       </View>
       {narrow ? updated : null}
-      {report.progress && !report.refreshError ? (
-        <Text style={{ fontSize: FONT.caption, color: theme.colors.foregroundMuted }}>{formatScanProgress(report.progress)}</Text>
-      ) : null}
-      {report.refreshError ? (
+      {report.refreshing ? <UsageRefreshStatus theme={theme} progress={report.progress} /> : null}
+      {report.refreshError && !report.refreshing ? (
         <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
           <Icon name="TriangleAlert" size={14} color={theme.colors.statusWarning} />
           <Text style={{ flex: 1, fontSize: FONT.body, color: theme.colors.statusWarning }}>
@@ -324,7 +322,7 @@ function Body({
 }
 
 export function UsageScreen({ theme, host, layout, params }: PluginScreenProps) {
-  const { data, error, isPending, preview } = useUsageReport(host.id);
+  const { data, error, isPending, preview, progress } = useUsageReport(host.id);
   const updatePrices = useRpc(updatePricesRpc);
   const queryClient = useQueryClient();
   const toast = useToast();
@@ -386,21 +384,21 @@ export function UsageScreen({ theme, host, layout, params }: PluginScreenProps) 
         ) : (
           <>
             {actions}
-            <View style={{ gap: 12, paddingVertical: 48, alignItems: "center" }}>
-              <Icon
-                name={isPending ? "Hourglass" : "CircleAlert"}
-                size={20}
-                color={isPending ? theme.colors.foregroundMuted : theme.colors.statusDanger}
-              />
-              <Text style={{ fontSize: FONT.title, color: theme.colors.foreground, textAlign: "center" }}>
-                {isPending ? "Reading usage logs…" : "Could not read usage"}
-              </Text>
-              {error ? (
-                <Text style={{ fontSize: FONT.body, color: theme.colors.foregroundMuted, textAlign: "center" }}>
-                  {error.message}
+            {isPending ? (
+              <UsageRefreshStatus theme={theme} progress={progress} />
+            ) : (
+              <View style={{ gap: 12, paddingVertical: 48, alignItems: "center" }}>
+                <Icon name="CircleAlert" size={20} color={theme.colors.statusDanger} />
+                <Text style={{ fontSize: FONT.title, color: theme.colors.foreground, textAlign: "center" }}>
+                  Could not read usage
                 </Text>
-              ) : null}
-            </View>
+                {error ? (
+                  <Text style={{ fontSize: FONT.body, color: theme.colors.foregroundMuted, textAlign: "center" }}>
+                    {error.message}
+                  </Text>
+                ) : null}
+              </View>
+            )}
           </>
         )}
       </View>

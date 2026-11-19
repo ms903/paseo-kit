@@ -41,6 +41,8 @@ test("shows the report's exact calendar dates and inclusive date ranges", () => 
 });
 
 test("describes the active usage scan and its elapsed time", () => {
+  assert.equal(formatScanProgress({ stage: "recentUsage", elapsedSeconds: 12 }), "Reading recent usage · 12s");
+  assert.equal(formatScanProgress({ stage: "totals", elapsedSeconds: 2 }), "Calculating usage totals…");
   assert.equal(formatScanProgress({ stage: "recentSessions", elapsedSeconds: 2 }), "Reading recent sessions…");
   assert.equal(formatScanProgress({ stage: "dailyHistory", elapsedSeconds: 19 }), "Reading daily history · 19s");
   assert.equal(formatScanProgress({ stage: "sessionHistory", elapsedSeconds: 71 }), "Reading session history · 1m 11s");

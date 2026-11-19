@@ -18,8 +18,8 @@ import {
   type TypicalDay,
   type UsageReport,
 } from "./data";
-import { formatAgo, formatCost, formatPercent, formatPeriodLong, formatScanProgress, formatTokens } from "./format";
-import { RefreshUsageButton } from "./refresh";
+import { formatAgo, formatCost, formatPercent, formatPeriodLong, formatTokens } from "./format";
+import { RefreshUsageButton, UsageRefreshStatus } from "./refresh";
 import { AgentList, FONT, Headline, TodayUsage } from "./summary";
 
 // Geometry follows the built-in usage summary and host-monitor in the same footer.
@@ -149,7 +149,7 @@ export function UsageSidebarItem({ theme, host, openPopover }: PluginSidebarItem
 }
 
 export function UsagePopover({ theme, host, layout, openScreen }: PluginPopoverProps) {
-  const { data, error, isPending, preview } = useUsageReport(host.id);
+  const { data, error, isPending, preview, progress } = useUsageReport(host.id);
   const [requestedKind, setKind] = useState<PeriodKind>("daily");
   const [pickedKey, setPickedKey] = useState<string | null>(null);
   const rootStyle = {
@@ -165,14 +165,13 @@ export function UsagePopover({ theme, host, layout, openScreen }: PluginPopoverP
     return (
       <View style={rootStyle}>
         <Text style={{ fontSize: FONT.title, color: theme.colors.foreground }}>Token usage</Text>
-        <Text
-          style={{
-            fontSize: FONT.body,
-            color: isPending ? theme.colors.foregroundMuted : theme.colors.statusDanger,
-          }}
-        >
-          {isPending ? "Reading usage logs..." : (error?.message ?? "Usage is unavailable.")}
-        </Text>
+        {isPending ? (
+          <UsageRefreshStatus theme={theme} progress={progress} />
+        ) : (
+          <Text style={{ fontSize: FONT.body, color: theme.colors.statusDanger }}>
+            {error?.message ?? "Usage is unavailable."}
+          </Text>
+        )}
         {error ? refresh : null}
       </View>
     );
@@ -263,10 +262,8 @@ function Footer({
 }) {
   return (
     <View style={{ gap: 6 }}>
-      {report.progress && !report.refreshError ? (
-        <Text style={{ fontSize: FONT.caption, color: theme.colors.foregroundMuted }}>{formatScanProgress(report.progress)}</Text>
-      ) : null}
-      {report.refreshError || report.sessionRefreshError ? (
+      {report.refreshing ? <UsageRefreshStatus theme={theme} progress={report.progress} /> : null}
+      {!report.refreshing && (report.refreshError || report.sessionRefreshError) ? (
         <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
           <Icon name="TriangleAlert" size={12} color={theme.colors.statusWarning} />
           <Text

@@ -30,7 +30,13 @@ export function oldestReportDay(today: string): string {
   return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() - REPORT_MONTHS + 1, 1)).toISOString().slice(0, 10);
 }
 
-export function createUsageHistory(timezone: string, signal: AbortSignal, scan = runCcusage, store?: UsageStore) {
+export function createUsageHistory(
+  timezone: string,
+  signal: AbortSignal,
+  scan = runCcusage,
+  store?: UsageStore,
+  onScan?: (kind: ScanKind, archived: boolean) => void,
+) {
   const saved = new Map<ScanKind, SavedHistory | undefined>();
   const retryAt = { daily: 0, session: 0 };
   let sessions: RawRow[] = [];
@@ -52,6 +58,7 @@ export function createUsageHistory(timezone: string, signal: AbortSignal, scan =
     const usable = old && old.since <= today && old.checkedAt <= now ? old : undefined;
     const rebuild = !usable || (mode !== "manual" && now >= usable.checkedAt + HISTORY_REFRESH_MS && now >= retryAt[kind]);
     const since = rebuild ? previousDay(today) : usable.since;
+    onScan?.(kind, false);
     const recent = await scan(kind, timezone, signal, since);
     return { since, recent, usable, rebuild };
   }
@@ -63,6 +70,7 @@ export function createUsageHistory(timezone: string, signal: AbortSignal, scan =
     let base = usable;
     if (rebuild) {
       try {
+        onScan?.(kind, true);
         const scanned = await scan(kind, timezone, signal, from, previousDay(since));
         if (signal.aborted) throw new Error("Usage scan cancelled");
         const older = from ? scanned.filter((row) => row.period >= from && row.period < since) : scanned;
@@ -73,7 +81,10 @@ export function createUsageHistory(timezone: string, signal: AbortSignal, scan =
         if (!usable || signal.aborted) throw error;
         retryAt[kind] = Date.now() + MAX_RETRY_MS;
         console.error(`[ccusage-stats] Could not reread older ${kind} usage: ${(error as Error).message}`);
-        if (usable.since !== since) recent = await scan(kind, timezone, signal, usable.since);
+        if (usable.since !== since) {
+          onScan?.(kind, false);
+          recent = await scan(kind, timezone, signal, usable.since);
+        }
       }
     }
     if (!base) throw new Error("Missing usage history");

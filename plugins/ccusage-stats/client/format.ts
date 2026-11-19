@@ -30,9 +30,11 @@ export function formatCost(cost: number | null): string {
 }
 
 const stageLabels: Record<ScanProgress["stage"], string> = {
+  recentUsage: "Reading recent usage",
   recentSessions: "Reading recent sessions",
   dailyHistory: "Reading daily history",
   sessionHistory: "Reading session history",
+  totals: "Calculating usage totals",
 };
 
 export function formatScanProgress({ stage, elapsedSeconds }: ScanProgress): string {
