@@ -53,8 +53,14 @@ export function gpuSummary(gpus: readonly GpuUsage[] | undefined) {
   if (!gpus?.length) return null;
   const loads = gpus.map((gpu) => gpu.utilizationPercent).filter((load) => load !== null);
   const count = `${gpus.length} GPU${gpus.length === 1 ? "" : "s"}`;
-  if (!loads.length) return { text: `×${gpus.length}`, description: count };
+  if (!loads.length) return { text: `×${gpus.length}`, wide: false, description: count };
   const percent = Math.max(...loads);
-  const text = formatPercent(percent);
-  return { text, percent, description: `${count}, ${gpus.length > 1 ? "peak " : ""}utilization ${text}` };
+  const load = formatPercent(percent);
+  const multiple = gpus.length > 1;
+  return {
+    text: multiple ? `×${gpus.length} ${load}` : load,
+    wide: multiple,
+    percent,
+    description: `${count}, ${multiple ? "peak " : ""}utilization ${load}`,
+  };
 }

@@ -58,6 +58,7 @@ interface Metric {
   icon: string;
   /** One number, or two (download and upload) sharing the icon. */
   texts: readonly string[];
+  wideValue?: boolean;
   percent?: number;
   /** Sets the color of a metric with a percent. */
   severity?: Severity;
@@ -90,6 +91,7 @@ function metricsOf(stats: HostStats, gpu: ReturnType<typeof gpuSummary>): Metric
       key: "gpu",
       icon: "CircuitBoard",
       texts: [gpu.text],
+      wideValue: gpu.wide,
       percent: gpu.percent,
       severity: gpu.percent === undefined ? undefined : percentSeverity(gpu.percent),
     });
@@ -163,7 +165,7 @@ function MetricLine({
             right-aligned; a pair hugs the separator between them. */}
         <Text
           numberOfLines={1}
-          style={[textStyle, { width: slotWidth, marginLeft: metered ? METER_GAP : TEXT_GAP, textAlign: "right" }]}
+          style={[textStyle, { width: metric.wideValue ? 2 * slotWidth : slotWidth, marginLeft: metered ? METER_GAP : TEXT_GAP, textAlign: "right" }]}
         >
           {first}
         </Text>
@@ -192,8 +194,9 @@ function MetricLine({
 /** Width of a meterless line; depends only on fixed sizes, never on values. */
 function lineWidth(metrics: readonly Metric[], slotWidth: number): number {
   let width = Math.max(metrics.length - 1, 0) * METRIC_GAP;
-  for (const { texts } of metrics) {
-    width += ICON_SIZE + TEXT_GAP + texts.length * slotWidth + (texts.length - 1) * PAIR_SEPARATOR_WIDTH;
+  for (const { texts, wideValue } of metrics) {
+    const slots = texts.length + (wideValue ? 1 : 0);
+    width += ICON_SIZE + TEXT_GAP + slots * slotWidth + (texts.length - 1) * PAIR_SEPARATOR_WIDTH;
   }
   return width;
 }

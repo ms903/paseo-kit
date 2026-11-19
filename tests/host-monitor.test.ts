@@ -18,8 +18,8 @@ test("the footer hides absent GPUs and distinguishes idle devices from missing u
   assert.equal(gpuSummary(undefined), null);
   assert.equal(gpuSummary([]), null);
   assert.equal(gpuSummary([gpus[0]])?.text, "0%");
-  assert.deepEqual(gpuSummary(gpus), { percent: 81, text: "81%", description: "3 GPUs, peak utilization 81%" });
-  assert.deepEqual(gpuSummary([gpus[2]]), { text: "×1", description: "1 GPU" });
+  assert.deepEqual(gpuSummary(gpus), { percent: 81, text: "×3 81%", wide: true, description: "3 GPUs, peak utilization 81%" });
+  assert.deepEqual(gpuSummary([gpus[2]]), { text: "×1", wide: false, description: "1 GPU" });
 });
 
 test("reads separate NVIDIA devices and preserves counters the driver omits", () => {
@@ -29,9 +29,9 @@ test("reads separate NVIDIA devices and preserves counters the driver omits", ()
     "invalid line",
   ].join("\r\n"));
   assert.deepEqual(gpus, [
-    { id: "0000:01:00.0", name: "NVIDIA GPU, fixture", utilizationPercent: 35,
+    { id: "0000:01:00.0", deviceLabel: "0", name: "NVIDIA GPU, fixture", utilizationPercent: 35,
       vramUsedBytes: 1024 * MIB, vramTotalBytes: 8192 * MIB, temperatureCelsius: 68 },
-    { id: "nvidia-1", name: "NVIDIA A100", utilizationPercent: null,
+    { id: "nvidia-1", deviceLabel: "1", name: "NVIDIA A100", utilizationPercent: null,
       vramUsedBytes: 0, vramTotalBytes: 40960 * MIB, temperatureCelsius: null },
   ]);
 });
@@ -52,11 +52,40 @@ test("reads AMD sysfs counters as bytes and ignores display connectors", async (
     };
     await Promise.all(Object.entries(values).map(([name, value]) => writeFile(path.join(device, name), `${value}\n`)));
     assert.deepEqual(await readDrmGpus(root), [
-      { id: "card0", name: "AMD Radeon fixture", utilizationPercent: 48,
+      { id: "card0", deviceLabel: "card0", name: "AMD Radeon fixture", utilizationPercent: 48,
         vramUsedBytes: 1024 * MIB, vramTotalBytes: 8192 * MIB, temperatureCelsius: 51.25 },
     ]);
+    assert.deepEqual(await readDrmGpus(root, undefined, new Set(["card0"])), []);
   } finally {
     await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("all eight GPUs retain driver indices and share one probe across views", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: new Date("2026-11-20T00:00:00Z") });
+  const indices = [0, 2, 5, 7, 1, 3, 4, 6];
+  const output = indices.map((i) =>
+    `${i}, 00000000:${10 + i}:00.0, NVIDIA A100, ${i === 7 ? 96 : 0}, ${i * 1024}, 81920, ${42 + i}`,
+  ).join("\n");
+  let probes = 0;
+  const sampler = createGpuSampler(async () => { probes++; return parseNvidiaGpus(output); });
+  try {
+    const [gpus, popover, detail] = await Promise.all([sampler.read(), sampler.read(), sampler.read()]);
+    assert.equal(gpus.length, 8);
+    assert.equal(new Set(gpus.map((gpu) => gpu.id)).size, 8);
+    assert.deepEqual(gpus.map((gpu) => gpu.deviceLabel), ["0", "1", "2", "3", "4", "5", "6", "7"]);
+    assert.equal(gpus[7].vramUsedBytes, 7 * 1024 * MIB);
+    assert.equal(gpuSummary(gpus)?.text, "×8 96%");
+    assert.equal(popover, gpus);
+    assert.equal(detail, gpus);
+    t.mock.timers.tick(9_999);
+    await sampler.read();
+    assert.equal(probes, 1);
+    t.mock.timers.tick(1);
+    await sampler.read();
+    assert.equal(probes, 2);
+  } finally {
+    sampler.stop();
   }
 });
 

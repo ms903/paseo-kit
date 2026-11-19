@@ -31,6 +31,7 @@ const memorySchema = z.object({
 
 const gpuSchema = z.object({
   id: z.string(),
+  deviceLabel: z.string().optional(),
   name: z.string(),
   utilizationPercent: z.number().nullable(),
   vramUsedBytes: z.number().nullable(),

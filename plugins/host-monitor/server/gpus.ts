@@ -34,12 +34,14 @@ export function parseNvidiaGpus(output: string): GpuUsage[] {
   const gpus: GpuUsage[] = [];
   for (const line of output.split("\n")) {
     const [index = "", address = "", ...fields] = line.split(",");
-    const id = pciAddress(address) ?? (/^\d+$/.test(index.trim()) ? `nvidia-${index.trim()}` : null);
+    const deviceLabel = /^\d+$/.test(index.trim()) ? index.trim() : undefined;
+    const id = pciAddress(address) ?? (deviceLabel ? `nvidia-${deviceLabel}` : null);
     if (!id || fields.length < 5) continue;
     const [load, used, total, temperature] = fields.splice(-4);
     const name = fields.join(",").trim().replace(/^"|"$/g, "").replaceAll('""', '"');
     gpus.push({
       id,
+      deviceLabel,
       name: name || "NVIDIA GPU",
       utilizationPercent: parseMetric(load),
       vramUsedBytes: scaled(used, MIB),
@@ -48,7 +50,9 @@ export function parseNvidiaGpus(output: string): GpuUsage[] {
     });
     if (gpus.length === MAX_GPUS) break;
   }
-  return gpus;
+  return gpus.sort((a, b) =>
+    Number(a.deviceLabel ?? Number.MAX_SAFE_INTEGER) - Number(b.deviceLabel ?? Number.MAX_SAFE_INTEGER),
+  );
 }
 
 async function readGpuCommand(command: string, args: string[], signal: AbortSignal): Promise<string> {
@@ -81,17 +85,20 @@ async function readTemperature(device: string, signal?: AbortSignal): Promise<nu
   return null;
 }
 
-export async function readDrmGpus(directory = "/sys/class/drm", signal?: AbortSignal): Promise<GpuUsage[]> {
+export async function readDrmGpus(directory = "/sys/class/drm", signal?: AbortSignal, measured?: ReadonlySet<string>): Promise<GpuUsage[]> {
   const entries = await readdir(directory).catch(() => []);
-  const cards = entries.filter((name) => /^card\d+$/.test(name)).sort().slice(0, MAX_GPUS);
+  const cards = entries.filter((name) => /^card\d+$/.test(name))
+    .sort((a, b) => Number(a.slice(4)) - Number(b.slice(4))).slice(0, MAX_GPUS);
   const gpus: GpuUsage[] = [];
   for (const card of cards) {
     if (signal?.aborted) break;
     const device = path.join(directory, card, "device");
+    const sysPath = await realpath(device).catch(() => "");
+    const id = pciAddress(path.basename(sysPath)) ?? card;
+    if (measured?.has(id)) continue;
     const vendor = vendors.get(await readProperty(device, "vendor", signal));
     if (!vendor) continue;
-    const [sysPath, product, chip, load, used, total, temperature] = await Promise.all([
-      realpath(device).catch(() => ""),
+    const [product, chip, load, used, total, temperature] = await Promise.all([
       readProperty(device, "product_name", signal),
       readProperty(device, "device", signal),
       readProperty(device, "gpu_busy_percent", signal),
@@ -100,7 +107,8 @@ export async function readDrmGpus(directory = "/sys/class/drm", signal?: AbortSi
       readTemperature(device, signal),
     ]);
     gpus.push({
-      id: pciAddress(path.basename(sysPath)) ?? card,
+      id,
+      deviceLabel: card,
       name: product || `${vendor} GPU${chip ? ` (${chip})` : ""}`,
       utilizationPercent: parseMetric(load),
       vramUsedBytes: parseMetric(used),
@@ -142,9 +150,10 @@ function createGpuCollector() {
 
     if (process.platform === "win32") return readNvidia(signal);
     if (process.platform !== "linux") return [];
-    const [nvidia, drm] = await Promise.all([readNvidia(signal), readDrmGpus(undefined, signal)]);
+    const nvidia = await readNvidia(signal);
     const nvidiaIds = new Set(nvidia.map((gpu) => gpu.id));
-    return [...nvidia, ...drm.filter((gpu) => !nvidiaIds.has(gpu.id))];
+    const drm = await readDrmGpus(undefined, signal, nvidiaIds);
+    return [...nvidia, ...drm];
   };
 }
 
