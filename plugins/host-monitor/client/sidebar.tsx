@@ -10,8 +10,8 @@ import {
   type LayoutChangeEvent,
   type PressableStateCallbackType,
 } from "react-native";
-import type { hostStatsRpc } from "../shared/stats";
-import { formatBytes, formatCompactRate, formatPercent, formatRate, formatUptime } from "./format";
+import type { GpuUsage, hostStatsRpc } from "../shared/stats";
+import { formatBytes, formatCompactRate, formatPercent, formatRate, formatUptime, gpuSummary } from "./format";
 import { GpuSection } from "./gpus";
 import {
   Meter,
@@ -24,6 +24,7 @@ import {
   scaleToPeak,
   severityColor,
   sumDisks,
+  useHostGpus,
   useHostStats,
   type Severity,
 } from "./stats";
@@ -44,7 +45,7 @@ export const HOST_MONITOR_SCREEN_ID = "host-monitor";
 
 type HostStats = RpcOutput<typeof hostStatsRpc>;
 
-type MetricKey = "cpu" | "memory" | "disk" | "network";
+type MetricKey = "cpu" | "memory" | "gpu" | "disk" | "network";
 
 /** Which metrics fit, and whether the percentages get meters. */
 interface LineLayout {
@@ -62,10 +63,10 @@ interface Metric {
   severity?: Severity;
 }
 
-// On a narrow sidebar, network goes first, then disk; CPU and RAM always stay.
+// Keep the processor readings together when space is tight.
 const DROP_ORDER: readonly MetricKey[] = ["network", "disk"];
 
-function metricsOf(stats: HostStats): Metric[] {
+function metricsOf(stats: HostStats, gpu: ReturnType<typeof gpuSummary>): Metric[] {
   const { current, memory, network, disks } = stats;
   const ram = memoryPercent(memory);
   const metrics: Metric[] = [
@@ -84,6 +85,15 @@ function metricsOf(stats: HostStats): Metric[] {
       severity: memorySeverity(memory),
     },
   ];
+  if (gpu) {
+    metrics.push({
+      key: "gpu",
+      icon: "CircuitBoard",
+      texts: [gpu.text],
+      percent: gpu.percent,
+      severity: gpu.percent === undefined ? undefined : percentSeverity(gpu.percent),
+    });
+  }
   if (disks.length > 0) {
     const { percent } = sumDisks(disks);
     metrics.push({
@@ -218,13 +228,14 @@ function triggerStyle(theme: PluginTheme) {
   });
 }
 
-function describe(hostLabel: string, stats: HostStats): string {
+function describe(hostLabel: string, stats: HostStats, gpu: ReturnType<typeof gpuSummary>): string {
   const { current, memory, network, disks } = stats;
   const parts = [
     `CPU ${formatPercent(current.cpuPercent)}`,
     `memory ${formatPercent(memoryPercent(memory))}`,
   ];
   if (memory.pressure) parts.push(`memory pressure ${memory.pressure}`);
+  if (gpu) parts.push(gpu.description);
   if (disks.length > 0) {
     const disk = sumDisks(disks);
     parts.push(`disk ${formatPercent(disk.percent)}, ${formatBytes(disk.availableBytes)} available`);
@@ -244,6 +255,7 @@ function layoutWidth(event: LayoutChangeEvent): number {
 
 export function HostStatusItem({ theme, host, openPopover }: PluginSidebarItemProps) {
   const { data } = useHostStats(host.id);
+  const { data: gpus } = useHostGpus(host.id);
   const [available, setAvailable] = useState<number | null>(null);
   const [measuredSlot, setMeasuredSlot] = useState<number | null>(null);
   const onAvailable = useCallback((e: LayoutChangeEvent) => setAvailable(layoutWidth(e)), []);
@@ -254,19 +266,20 @@ export function HostStatusItem({ theme, host, openPopover }: PluginSidebarItemPr
 
   // Like the built-in usage summary: nothing until there is something to show.
   if (!data) return null;
-  const metrics = metricsOf(data);
+  const gpu = gpuSummary(gpus);
+  const metrics = metricsOf(data, gpu);
   const slotWidth = measuredSlot ?? ESTIMATED_SLOT_WIDTH;
   const layout = chooseLayout(available, metrics, slotWidth);
 
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={describe(host.label, data)}
+      accessibilityLabel={describe(host.label, data, gpu)}
       onPress={() => openPopover(HostPopover)}
       style={triggerStyle(theme)}
     >
       <View
-        style={{ flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", overflow: "hidden" }}
+        style={{ flex: 1, minWidth: 0, flexDirection: "row", flexWrap: "wrap", alignItems: "center", overflow: "hidden" }}
         onLayout={onAvailable}
       >
         <MetricLine theme={theme} layout={layout} slotWidth={slotWidth} />
@@ -397,7 +410,7 @@ function DiskSection({ theme, disks }: { theme: PluginTheme; disks: HostStats["d
   );
 }
 
-function HostMetrics({ theme, data }: { theme: PluginTheme; data: HostStats }) {
+function HostMetrics({ theme, data, gpus }: { theme: PluginTheme; data: HostStats; gpus?: GpuUsage[] }) {
   const { current, history, memory, network, disks } = data;
 
   return (
@@ -419,6 +432,7 @@ function HostMetrics({ theme, data }: { theme: PluginTheme; data: HostStats }) {
         values={history.map((s) => s.memoryPercent)}
         detail={memoryDetail(memory)}
       />
+      <GpuSection theme={theme} gpus={gpus} />
       {network ? (
         <>
           <PreviewRow
@@ -446,6 +460,7 @@ function HostMetrics({ theme, data }: { theme: PluginTheme; data: HostStats }) {
 
 function HostDetails({ theme, host, action }: Pick<PluginHostProps, "theme" | "host"> & { action?: ReactNode }) {
   const { data, isError } = useHostStats(host.id);
+  const { data: gpus } = useHostGpus(host.id);
 
   return (
     <>
@@ -464,7 +479,7 @@ function HostDetails({ theme, host, action }: Pick<PluginHostProps, "theme" | "h
         </View>
         {action}
       </View>
-      {data ? <HostMetrics theme={theme} data={data} /> : (
+      {data ? <HostMetrics theme={theme} data={data} gpus={gpus} /> : (
         <Text style={{ color: theme.colors.foregroundMuted, fontSize: FONT_SIZE }}>
           {isError ? "Could not load host metrics." : "Loading…"}
         </Text>
@@ -510,7 +525,6 @@ export function HostMonitorScreen({ theme, layout, host }: PluginScreenProps) {
         backgroundColor: theme.colors.surface1,
       }}>
         <HostDetails theme={theme} host={host} />
-        <GpuSection theme={theme} host={host} />
       </View>
     </ScrollView>
   );

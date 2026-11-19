@@ -14,7 +14,7 @@ complete, self-contained Paseo plugin project.
 
 | ID | Name | What it does |
 | --- | --- | --- |
-| [`host-monitor`](plugins/host-monitor) | Host monitor | CPU, RAM, disk and network speed of the daemon host in the sidebar footer, with a history popover. |
+| [`host-monitor`](plugins/host-monitor) | Host monitor | CPU, RAM, GPU, disk and network readings for the daemon host in the sidebar footer and popover. |
 | [`ccusage-stats`](plugins/ccusage-stats) | Token usage | Token usage and estimated cost of your coding agents via [ccusage](https://github.com/ccusage/ccusage): today's total, day/week/month breakdown by agent, and a per-session composer pill. |
 | [`file-download`](plugins/file-download) | Download file | Cmd+S or Ctrl+S downloads the file you are previewing, including files outside the workspace such as `/tmp`. |
 | [`tab-recovery`](plugins/tab-recovery) | Closed agents | Lists the agents whose tab was closed (which archives them) in the current workspace and reopens one with a press. |
@@ -22,11 +22,11 @@ complete, self-contained Paseo plugin project.
 
 ### host-monitor
 
-- One sidebar footer line: CPU, RAM and disk percentage with small meters, then download and upload speed under one icon.
+- The sidebar footer shows CPU, RAM, disk, network and the busiest detected GPU's utilization.
 - Yellow above 70%, red above 90%; on a narrow sidebar network speed is dropped first, then disk.
 - Popover with about three minutes of history per metric, available space on each local disk, uptime and load average.
-- **Details** shows GPU status and the host picker when Host Monitor is installed on multiple hosts.
-- Samples on demand, with CPU and network readings at most every 2 s and GPU readings every 10 s while Details is open. History stays in memory.
+- The popover and **Details** show each detected GPU. The details page includes the host picker when Host Monitor is installed on multiple hosts.
+- Visible monitors share CPU and network readings for 2 seconds and GPU readings for 10 seconds. Hosts with no detected GPU are checked at most once a minute. History stays in memory.
 
 ### ccusage-stats
 

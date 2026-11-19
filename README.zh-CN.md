@@ -10,7 +10,7 @@
 
 | ID | 名称 | 功能 |
 | --- | --- | --- |
-| [`host-monitor`](plugins/host-monitor) | Host monitor | 在侧边栏底部显示 daemon 主机的 CPU、内存、磁盘和网速，点击查看历史曲线。 |
+| [`host-monitor`](plugins/host-monitor) | Host monitor | 在侧边栏底部显示主机的 CPU、内存、GPU、磁盘和网速，点击查看各项指标。 |
 | [`ccusage-stats`](plugins/ccusage-stats) | Token usage | 基于 [ccusage](https://github.com/ccusage/ccusage) 统计编码 agent 的 token 消耗与估算费用：今日总量、按日/周/月分 agent 分析、当前 session 消耗。 |
 | [`file-download`](plugins/file-download) | Download file | 用 Cmd+S 或 Ctrl+S 下载当前预览的文件，包括 `/tmp` 等工作区外的文件。 |
 | [`tab-recovery`](plugins/tab-recovery) | Closed agents | 列出当前工作区里被关闭（即被归档）的 agent，一键重新打开。 |
@@ -18,11 +18,11 @@
 
 ### host-monitor
 
-- 侧边栏底部一行：CPU、内存、磁盘百分比与小进度条，以及共用一个图标的下载 / 上传速度。
+- 侧边栏底部显示 CPU、内存、磁盘和网速。检测到显卡时显示 GPU 利用率，多卡取最高值。
 - 超过 70% 变黄，超过 90% 变红；侧边栏较窄时先隐藏网速，再隐藏磁盘。
 - 弹出层展示每项指标约三分钟的历史，每块本地磁盘的用量和剩余空间，以及运行时间和负载。
-- **Details** 页面显示显卡状态。多台 host 安装 Host Monitor 时，可在页面顶部切换 host。
-- 按需采样，CPU 和网速最快每 2 秒更新，GPU 在打开 **Details** 时每 10 秒更新。历史保存在内存中，网速仅支持 Linux。
+- 点击底栏可查看每张显卡的型号、利用率、显存和温度。多台 host 安装 Host Monitor 时，可在 **Details** 页面顶部切换 host。
+- 各视图共享主机采样，CPU 和网速最快每 2 秒更新，GPU 最快每 10 秒更新，未检测到显卡时每分钟最多检查一次。历史保存在内存中，网速仅支持 Linux。
 
 ### ccusage-stats
 

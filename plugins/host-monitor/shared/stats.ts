@@ -39,6 +39,7 @@ const gpuSchema = z.object({
 });
 
 export const GPU_REFRESH_MS = 10_000;
+export const GPU_RECHECK_MS = 60_000;
 
 export const gpuStatsRpc = defineRpc({
   name: "host.gpus",

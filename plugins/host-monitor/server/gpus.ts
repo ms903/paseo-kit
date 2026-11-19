@@ -2,12 +2,11 @@ import { execFile } from "node:child_process";
 import { readFile, readdir, realpath } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
-import { GPU_REFRESH_MS, type GpuUsage } from "../shared/stats";
+import { GPU_RECHECK_MS, GPU_REFRESH_MS, type GpuUsage } from "../shared/stats";
 
 const execFileAsync = promisify(execFile);
 const MAX_GPUS = 64;
 const MIB = 1024 * 1024;
-const EMPTY_REFRESH_MS = 60_000;
 const vendors = new Map([
   ["0x1002", "AMD"],
   ["0x10de", "NVIDIA"],
@@ -122,7 +121,7 @@ function createGpuCollector() {
       "--format=csv,noheader,nounits",
     ], signal);
     const gpus = parseNvidiaGpus(output);
-    if (!gpus.length) nextNvidiaReadAt = Date.now() + EMPTY_REFRESH_MS;
+    if (!gpus.length) nextNvidiaReadAt = Date.now() + GPU_RECHECK_MS;
     return gpus;
   };
 
@@ -149,7 +148,7 @@ function createGpuCollector() {
   };
 }
 
-/** Only the host details RPC starts a sample. Calls share a snapshot and a single in-flight read. */
+/** Visible host monitors share a snapshot and a single in-flight probe. */
 export function createGpuSampler(collect = createGpuCollector()) {
   const lifetime = new AbortController();
   let saved: GpuUsage[] = [];
@@ -162,7 +161,7 @@ export function createGpuSampler(collect = createGpuCollector()) {
       if (Date.now() < expiresAt) return Promise.resolve(saved);
       pending ??= collect(lifetime.signal).then((gpus) => {
         saved = gpus;
-        expiresAt = Date.now() + (gpus.length ? GPU_REFRESH_MS : EMPTY_REFRESH_MS);
+        expiresAt = Date.now() + (gpus.length ? GPU_REFRESH_MS : GPU_RECHECK_MS);
         return gpus;
       }).finally(() => {
         pending = null;

@@ -1,3 +1,5 @@
+import type { GpuUsage } from "../shared/stats";
+
 // Steps of 1024 carry IEC names: 994,610,155,520 bytes is 926.3 GiB, not 926.3 GB.
 const UNITS = ["B", "KiB", "MiB", "GiB", "TiB"];
 
@@ -45,4 +47,14 @@ export function formatPercent(percent: number): string {
   // 9.95 and up would print as "10.0"; keep the text within the "100%" slot.
   if (value < 9.95) return `${value.toFixed(1)}%`;
   return `${Math.round(value)}%`;
+}
+
+export function gpuSummary(gpus: readonly GpuUsage[] | undefined) {
+  if (!gpus?.length) return null;
+  const loads = gpus.map((gpu) => gpu.utilizationPercent).filter((load) => load !== null);
+  const count = `${gpus.length} GPU${gpus.length === 1 ? "" : "s"}`;
+  if (!loads.length) return { text: `×${gpus.length}`, description: count };
+  const percent = Math.max(...loads);
+  const text = formatPercent(percent);
+  return { text, percent, description: `${count}, ${gpus.length > 1 ? "peak " : ""}utilization ${text}` };
 }

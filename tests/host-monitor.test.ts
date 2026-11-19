@@ -5,8 +5,22 @@ import path from "node:path";
 import { test } from "node:test";
 import { createGpuSampler, parseNvidiaGpus, readDrmGpus } from "../plugins/host-monitor/server/gpus";
 import { startSampler } from "../plugins/host-monitor/server/sampler";
+import { gpuSummary } from "../plugins/host-monitor/client/format";
 
 const MIB = 1024 * 1024;
+
+test("the footer hides absent GPUs and distinguishes idle devices from missing utilization", () => {
+  const gpus = parseNvidiaGpus([
+    "0, 0000:01:00.0, First, 0, 0, 8192, 40",
+    "1, 0000:02:00.0, Second, 81, 4096, 8192, 61",
+    "2, 0000:03:00.0, Third, N/A, 0, 8192, N/A",
+  ].join("\n"));
+  assert.equal(gpuSummary(undefined), null);
+  assert.equal(gpuSummary([]), null);
+  assert.equal(gpuSummary([gpus[0]])?.text, "0%");
+  assert.deepEqual(gpuSummary(gpus), { percent: 81, text: "81%", description: "3 GPUs, peak utilization 81%" });
+  assert.deepEqual(gpuSummary([gpus[2]]), { text: "×1", description: "1 GPU" });
+});
 
 test("reads separate NVIDIA devices and preserves counters the driver omits", () => {
   const gpus = parseNvidiaGpus([

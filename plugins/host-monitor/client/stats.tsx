@@ -3,6 +3,9 @@ import { useRpc } from "@getpaseo/plugin/client";
 import { useQuery } from "@tanstack/react-query";
 import { View, type ViewStyle } from "react-native";
 import {
+  GPU_RECHECK_MS,
+  GPU_REFRESH_MS,
+  gpuStatsRpc,
   hostStatsRpc,
   type DiskUsage,
   type HostSample,
@@ -19,6 +22,17 @@ export function useHostStats(hostId: string) {
     queryFn: () => getStats({}),
     staleTime: REFRESH_MS,
     refetchInterval: REFRESH_MS,
+  });
+}
+
+export function useHostGpus(hostId: string) {
+  const getGpus = useRpc(gpuStatsRpc);
+  return useQuery({
+    queryKey: ["host-gpus", hostId],
+    queryFn: () => getGpus({}),
+    staleTime: (query) => query.state.data?.length === 0 ? GPU_RECHECK_MS : GPU_REFRESH_MS,
+    refetchInterval: (query) => query.state.data?.length ? GPU_REFRESH_MS : GPU_RECHECK_MS,
+    retry: false,
   });
 }
 
