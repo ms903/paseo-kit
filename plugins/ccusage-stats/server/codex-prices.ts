@@ -412,6 +412,7 @@ export function createReportPricer(homes = defaultHomes(), store?: UsageStore, r
     catalog: PriceCatalog,
     signal: AbortSignal,
     sections: readonly (keyof RawReport)[] = PERIODS,
+    onRead?: (id: string) => () => void,
   ): Promise<ReportPrices> {
     const tallies = {
       daily: new Map<string, PricedUsage>(),
@@ -453,7 +454,14 @@ export function createReportPricer(homes = defaultHomes(), store?: UsageStore, r
         let buckets = cachedFile?.signature === signature ? cachedFile.buckets : await index?.get(source.file, signature);
         if (!buckets) {
           if (budget.aborted) continue;
-          buckets = await readFile(source.file, timezone, bounds, budget).catch(() => undefined);
+          const fileName = path.basename(source.file);
+          const uuid = /([0-9a-f]{8})-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?=\.jsonl)/i.exec(fileName);
+          const done = onRead?.(uuid?.[1] ?? fileName.slice(0, 12));
+          try {
+            buckets = await readFile(source.file, timezone, bounds, budget).catch(() => undefined);
+          } finally {
+            done?.();
+          }
           if (!buckets) continue;
           await index?.set(source.file, signature, buckets);
         }

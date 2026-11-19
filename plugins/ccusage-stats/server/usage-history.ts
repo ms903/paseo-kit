@@ -35,7 +35,7 @@ export function createUsageHistory(
   signal: AbortSignal,
   scan = runCcusage,
   store?: UsageStore,
-  onScan?: (kind: ScanKind, archived: boolean) => void,
+  onScan?: (kind: ScanKind, since?: string, until?: string) => void,
 ) {
   const saved = new Map<ScanKind, SavedHistory | undefined>();
   const retryAt = { daily: 0, session: 0 };
@@ -56,25 +56,27 @@ export function createUsageHistory(
     const old = saved.get(kind);
     const now = Date.now();
     const usable = old && old.since <= today && old.checkedAt <= now ? old : undefined;
-    const rebuild = !usable || (mode !== "manual" && now >= usable.checkedAt + HISTORY_REFRESH_MS && now >= retryAt[kind]);
+    const needsAllDates = kind === "daily" && !usable?.allDates;
+    const archiveExpired = mode !== "manual" && now >= (usable?.checkedAt ?? 0) + HISTORY_REFRESH_MS;
+    const rebuild = !usable || (now >= retryAt[kind] && (needsAllDates || archiveExpired));
     const since = rebuild ? previousDay(today) : usable.since;
-    onScan?.(kind, false);
+    onScan?.(kind, since);
     const recent = await scan(kind, timezone, signal, since);
     return { since, recent, usable, rebuild };
   }
 
-  async function readWindow(kind: ScanKind, window: UsageWindow, today: string) {
-    const from = kind === "daily" ? oldestReportDay(today) : undefined;
+  async function readWindow(kind: ScanKind, window: UsageWindow) {
     const { since, usable, rebuild } = window;
     let { recent } = window;
     let base = usable;
     if (rebuild) {
       try {
-        onScan?.(kind, true);
-        const scanned = await scan(kind, timezone, signal, from, previousDay(since));
+        const until = previousDay(since);
+        onScan?.(kind, undefined, until);
+        const scanned = await scan(kind, timezone, signal, undefined, until);
         if (signal.aborted) throw new Error("Usage scan cancelled");
-        const older = from ? scanned.filter((row) => row.period >= from && row.period < since) : scanned;
-        base = { older, since, checkedAt: Date.now() };
+        const older = kind === "daily" ? scanned.filter((row) => row.period < since) : scanned;
+        base = { older, since, checkedAt: Date.now(), allDates: true };
         saved.set(kind, base);
         await store?.saveHistory(kind, base);
       } catch (error) {
@@ -82,17 +84,17 @@ export function createUsageHistory(
         retryAt[kind] = Date.now() + MAX_RETRY_MS;
         console.error(`[ccusage-stats] Could not reread older ${kind} usage: ${(error as Error).message}`);
         if (usable.since !== since) {
-          onScan?.(kind, false);
+          onScan?.(kind, usable.since);
           recent = await scan(kind, timezone, signal, usable.since);
         }
       }
     }
     if (!base) throw new Error("Missing usage history");
     const { older } = base;
-    if (from) {
+    if (kind === "daily") {
       recent = recent.filter((row) => row.period >= base.since);
       dailySignature = createHash("sha256").update(String(base.checkedAt)).update(JSON.stringify(recent)).digest("hex");
-      return older.filter((row) => row.period >= from).concat(recent);
+      return older.concat(recent);
     }
     return joinSessions(older, recent);
   }
@@ -106,7 +108,7 @@ export function createUsageHistory(
         if (prepared?.error) throw prepared.error;
         const window = prepared?.window ?? await openWindow("session", today, mode);
         pricingWindow = { since: window.since, recent: window.recent };
-        sessions = await readWindow("session", window, today);
+        sessions = await readWindow("session", window);
         pricingWindow = undefined;
         sessionRevision++;
         sessionError = null;
@@ -137,12 +139,11 @@ export function createUsageHistory(
       const base = saved.get("daily");
       if (mode === "prices" && base && lastDays?.today === today) {
         await onRecent?.(lastDays.recent, base.since);
-        const from = oldestReportDay(today);
-        return structuredClone(base.older.filter((row) => row.period >= from).concat(lastDays.recent));
+        return structuredClone(base.older.concat(lastDays.recent));
       }
       const window = await openWindow("daily", today, mode);
       await onRecent?.(window.recent, window.since);
-      const days = await readWindow("daily", window, today);
+      const days = await readWindow("daily", window);
       dailyReads++;
       const cutoff = saved.get("daily")!.since;
       lastDays = { today, recent: days.filter((row) => row.period >= cutoff) };
@@ -157,6 +158,7 @@ export function createUsageHistory(
       }
     },
     readSessions,
+    get allDates() { return saved.get("daily")?.allDates === true; },
     get dailyReads() { return dailyReads; },
     get revision() { return `${dailySignature}:${sessionRevision}:${sessionError}`; },
   };

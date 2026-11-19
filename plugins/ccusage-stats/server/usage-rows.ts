@@ -71,11 +71,11 @@ export function weekOf(day: string): string {
   return date.toISOString().slice(0, 10);
 }
 
-/** Group daily rows after pricing, so every week and month uses the same days as the chart. */
-export function rollupDays(daily: RawRow[], kind: "weekly" | "monthly"): RawRow[] {
+/** Group priced days into calendar periods or a single lifetime total. */
+export function rollupDays(daily: RawRow[], kind: "weekly" | "monthly" | "total"): RawRow[] {
   const groups = new Map<string, RawRow & { agents: RawAgentRow[] }>();
   for (const day of daily) {
-    const period = kind === "weekly" ? weekOf(day.period) : day.period.slice(0, 7);
+    const period = kind === "total" ? "total" : kind === "weekly" ? weekOf(day.period) : day.period.slice(0, 7);
     let group = groups.get(period);
     if (!group) {
       group = { ...emptyRow(period, "all"), agents: [] };

@@ -1,4 +1,4 @@
-import type { PeriodKind, ScanProgress } from "../shared/usage";
+import type { PeriodKind, ScanProgress, UsageView } from "../shared/usage";
 
 const integer = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
 const usd = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
@@ -37,8 +37,14 @@ const stageLabels: Record<ScanProgress["stage"], string> = {
   totals: "Calculating usage totals",
 };
 
-export function formatScanProgress({ stage, elapsedSeconds }: ScanProgress): string {
-  const label = stageLabels[stage];
+export function formatScanProgress({ stage, elapsedSeconds, window, codexSessions }: ScanProgress): string {
+  let label = stageLabels[stage];
+  if (codexSessions?.length) {
+    label = `Reading Codex sessions · ${codexSessions.join(", ")}`;
+  } else if (window) {
+    const dates = [window.since && `from ${longDay.format(dateOf(window.since))}`, window.until && `through ${longDay.format(dateOf(window.until))}`];
+    label += ` · ccusage ${dates.filter(Boolean).join(" ")}`.trimEnd();
+  }
   if (elapsedSeconds < 5) return label + "…";
   const minutes = Math.floor(elapsedSeconds / 60);
   const seconds = elapsedSeconds % 60;
@@ -80,7 +86,8 @@ export function formatPeriodRange(kind: PeriodKind, key: string, through?: strin
   return `${shortDay.format(start)}–${last.getUTCDate()}, ${year}`;
 }
 
-export function formatPeriodLong(kind: PeriodKind, key: string, through?: string): string {
+export function formatPeriodLong(kind: UsageView, key: string, through?: string): string {
+  if (kind === "total") return "All time";
   return kind === "monthly" ? longMonth.format(dateOf(key)) : formatPeriodRange(kind, key, through);
 }
 

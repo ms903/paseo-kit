@@ -133,7 +133,7 @@ function sampleReport(session: string): RawReport {
 
 test("prices GPT-6.2 per request, including cached tokens, long context and recorded Fast mode", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "paseo-codex-prices-"));
-  const session = "2026/11/17/rollout-2026-11-17T12-00-00-test";
+  const session = "2026/11/17/rollout-2026-11-17T12-00-00-1234abcd-abcd-1234-abcd-1234abcd5678";
   const file = path.join(root, "sessions", `${session}.jsonl`);
   await mkdir(path.dirname(file), { recursive: true });
   const at = "2026-11-17T12:00:00Z";
@@ -187,7 +187,16 @@ test("prices GPT-6.2 per request, including cached tokens, long context and reco
     const preparePrices = createReportPricer([root], createUsageStore("UTC", cache));
     const signal = new AbortController().signal;
     const report = sampleReport(session);
-    const applyPrices = await preparePrices(report.session, "UTC", EMPTY_CATALOG, signal);
+    const activity: string[] = [];
+    const trackRead = (id: string) => {
+      activity.push(`start:${id}`);
+      return () => { activity.push(`stop:${id}`); };
+    };
+    const applyPrices = await preparePrices(report.session, "UTC", EMPTY_CATALOG, signal, undefined, trackRead);
+    assert.deepEqual(activity, ["start:1234abcd", "stop:1234abcd"]);
+    activity.length = 0;
+    await preparePrices(report.session, "UTC", EMPTY_CATALOG, signal, undefined, trackRead);
+    assert.deepEqual(activity, []);
     applyPrices(report);
     for (const rows of [
       report.daily,

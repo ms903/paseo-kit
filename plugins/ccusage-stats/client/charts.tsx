@@ -1,7 +1,7 @@
 import type { PluginTheme } from "@getpaseo/plugin";
 import { useState } from "react";
 import { Pressable, Text, View, type LayoutChangeEvent, type PressableStateCallbackType } from "react-native";
-import type { PeriodKind, UsagePeriod } from "../shared/usage";
+import type { PeriodKind, UsagePeriod, UsageView } from "../shared/usage";
 import { agentSwatch, foldAgents, OTHER_AGENT, type Swatch } from "./data";
 import { agentLabel, formatPeriodLong, formatPeriodShort, formatTokens } from "./format";
 
@@ -48,6 +48,7 @@ export function Segmented<Value extends string>({
             key={option.value}
             accessibilityRole="tab"
             accessibilityState={{ selected }}
+            aria-selected={selected}
             accessibilityLabel={option.label}
             onPress={() => onChange(option.value)}
             style={({ hovered }: HoverState) => ({
@@ -79,10 +80,11 @@ export function Segmented<Value extends string>({
   );
 }
 
-export const PERIOD_OPTIONS: readonly SegmentedOption<PeriodKind>[] = [
+export const PERIOD_OPTIONS: readonly SegmentedOption<UsageView>[] = [
   { value: "daily", label: "Day" },
   { value: "weekly", label: "Week" },
   { value: "monthly", label: "Month" },
+  { value: "total", label: "Total" },
 ];
 
 export function SwatchDot({ swatch, size = 8 }: { swatch: Swatch; size?: number }) {

@@ -47,3 +47,11 @@ test("describes the active usage scan and its elapsed time", () => {
   assert.equal(formatScanProgress({ stage: "dailyHistory", elapsedSeconds: 19 }), "Reading daily history · 19s");
   assert.equal(formatScanProgress({ stage: "sessionHistory", elapsedSeconds: 71 }), "Reading session history · 1m 11s");
 });
+
+test("names the all-time view and describes the current scan source", () => {
+  assert.equal(formatPeriodLong("total", "total"), "All time");
+  assert.equal(formatScanProgress({ stage: "recentSessions", elapsedSeconds: 12, window: { since: "2026-11-19" } }),
+    "Reading recent sessions · ccusage from November 19, 2026 · 12s");
+  assert.equal(formatScanProgress({ stage: "totals", elapsedSeconds: 13, codexSessions: ["1234abcd", "abcd1234"] }),
+    "Reading Codex sessions · 1234abcd, abcd1234 · 13s");
+});

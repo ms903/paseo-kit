@@ -26,6 +26,7 @@ const historySchema = z.object({
   since: z.iso.date(),
   checkedAt: z.number().nonnegative(),
   older: reportRows,
+  allDates: z.literal(true).optional(),
 });
 export type SavedHistory = z.infer<typeof historySchema>;
 
@@ -91,7 +92,11 @@ export function createUsageStore(timezone: string, directory = path.join(paseoHo
 
   function contentOf(report: UsageReport): string {
     const { today, timezone, agents, daily, weekly, monthly, recentSessions, sessionRefreshError } = report;
-    const values = [today, timezone, agents, daily, weekly, monthly, recentSessions, sessionRefreshError, report.historyPending, report.sessionsPending];
+    const values: unknown[] = [
+      today, timezone, agents, daily, weekly, monthly, recentSessions,
+      sessionRefreshError, report.historyPending, report.sessionsPending,
+    ];
+    if (report.total) values.push(report.total);
     return createHash("sha256").update(JSON.stringify(values)).digest("hex");
   }
 

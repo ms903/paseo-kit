@@ -37,6 +37,8 @@ const sessionSchema = z.object({
 const progressSchema = z.object({
   stage: z.enum(["recentUsage", "recentSessions", "dailyHistory", "sessionHistory", "totals"]),
   elapsedSeconds: z.number().nonnegative(),
+  window: z.object({ since: z.iso.date().optional(), until: z.iso.date().optional() }).optional(),
+  codexSessions: z.array(z.string().max(12)).max(2).optional(),
 });
 export type ScanProgress = z.infer<typeof progressSchema>;
 
@@ -54,6 +56,7 @@ export const usageReportSchema = z.object({
   daily: z.array(periodSchema),
   weekly: z.array(periodSchema),
   monthly: z.array(periodSchema),
+  total: periodSchema.optional(),
   recentSessions: z.array(sessionSchema),
   sessionRefreshError: z.string().nullable().optional(),
   /** Set when the latest refresh failed and an older report is served instead. */
@@ -126,6 +129,7 @@ export type UsagePeriod = z.infer<typeof periodSchema>;
 export type SessionUsage = z.infer<typeof sessionSchema>;
 export type SessionMatch = z.infer<typeof sessionMatchSchema>;
 export type PeriodKind = "daily" | "weekly" | "monthly";
+export type UsageView = PeriodKind | "total";
 
 export const EMPTY_USAGE: Usage = {
   inputTokens: 0,

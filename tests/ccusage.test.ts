@@ -39,12 +39,12 @@ test("replaces the recent window and reconciles older days after seven days", as
   });
   const first = await history.readDays("2026-11-02");
   first[0].modelBreakdowns[0].cost = 50;
-  assert.deepEqual(await history.readDays("2026-11-02"), [row("2026-10-31", 1), row("2026-11-02", 8)]);
+  assert.deepEqual(await history.readDays("2026-11-02"), [row("2025-11-30", 123), row("2026-10-31", 1), row("2026-11-02", 8)]);
   t.mock.timers.tick(7 * 24 * 3_600_000);
-  assert.deepEqual(await history.readDays("2026-11-09"), [row("2026-10-31", 12)]);
+  assert.deepEqual(await history.readDays("2026-11-09"), [row("2025-11-30", 123), row("2026-10-31", 12)]);
   assert.deepEqual(bounds, [
-    ["2026-11-01", undefined], ["2025-12-01", "2026-10-31"], ["2026-11-01", undefined],
-    ["2026-11-08", undefined], ["2025-12-01", "2026-11-07"],
+    ["2026-11-01", undefined], [undefined, "2026-10-31"], ["2026-11-01", undefined],
+    ["2026-11-08", undefined], [undefined, "2026-11-07"],
   ]);
 });
 
@@ -130,7 +130,7 @@ test("report and session RPCs return during a slow cold scan, then restore a dis
       await olderDays.promise;
       const older = row("2026-11-13", 400);
       older.modelBreakdowns[0].modelName = "gpt-6.2-sol";
-      return [{ ...older, agents: [older, row("2026-11-13", 30, "pi")] }];
+      return [row("2025-09-01", 100), { ...older, agents: [older, row("2026-11-13", 30, "pi")] }];
     }
     if (kind === "session") {
       await (until ? olderSessions : recentSessions).promise;
@@ -148,7 +148,7 @@ test("report and session RPCs return during a slow cold scan, then restore a dis
   });
   const loading = await cache.read();
   assert.ok("status" in loading && loading.status === "loading");
-  assert.deepEqual(loading.progress, { stage: "recentUsage", elapsedSeconds: 0 });
+  assert.equal(loading.progress?.stage, "recentUsage");
   recentDays.resolve();
   async function stage(expected: "recentSessions" | "dailyHistory" | "sessionHistory", callCount: number) {
     for (let i = 0; i < 400; i++) {
@@ -165,6 +165,9 @@ test("report and session RPCs return during a slow cold scan, then restore a dis
   assert.equal(initial.daily.length, 2);
   assert.deepEqual(initial.weekly, []);
   assert.deepEqual(initial.monthly, []);
+  assert.equal(initial.total, undefined);
+  assert.equal(initial.progress?.window?.until, undefined);
+  assert.ok(initial.progress?.window?.since);
   assert.deepEqual(await cache.sessions(), []);
   recentSessions.resolve();
   const recent = await stage("dailyHistory", 3);
@@ -184,6 +187,8 @@ test("report and session RPCs return during a slow cold scan, then restore a dis
   assert.equal(oldDay.agents.find((a) => a.agent === "codex")?.models[0].usage.cost, null);
   assert.equal(oldDay.agents.find((a) => a.agent === "pi")?.usage.cost, 3);
   assert.equal(calendar.monthly.at(-1)?.usage.cost, null);
+  assert.equal(calendar.total?.usage.cost, null);
+  assert.equal(calendar.total?.usage.totalTokens, 634);
   assert.equal(calendar.daily.at(-1)?.usage.cost, 8);
   assert.deepEqual(calendar.recentSessions, []);
   assert.deepEqual(await cache.sessions(), []);
@@ -194,6 +199,8 @@ test("report and session RPCs return during a slow cold scan, then restore a dis
   assert.equal(first.daily.at(-1)?.usage.totalTokens, 86);
   assert.equal(first.daily.find((r) => r.period === "2026-11-13")?.usage.cost, 43);
   assert.equal(first.monthly.at(-1)?.usage.cost, 51);
+  assert.equal(first.total?.usage.cost, 61);
+  assert.equal(first.total?.agents.length, 2);
   assert.equal(first.sessionsPending, undefined);
   assert.equal(first.progress, undefined);
   cache.stop();
@@ -214,6 +221,7 @@ test("report and session RPCs return during a slow cold scan, then restore a dis
   assert.ok(!("status" in restored));
   assert.equal(restored.generatedAt, first.generatedAt);
   assert.equal(restored.recentSessions[0].usage.totalTokens, 492);
+  assert.deepEqual(restored.total, first.total);
   resume();
   const next = await complete(restarted);
   assert.equal(next.daily.at(-1)?.usage.totalTokens, 106);
@@ -355,13 +363,16 @@ test("manual refresh coalesces clicks, reuses archives, checks changed sessions 
     for (const reply of replies) {
       assert.ok("status" in reply && reply.status === "unchanged" && reply.refreshing);
       assert.ok(!("daily" in reply));
-      assert.deepEqual(reply.progress, { stage: "recentUsage", elapsedSeconds: 0 });
+      assert.equal(reply.progress?.stage, "recentUsage");
+      assert.equal(reply.progress?.elapsedSeconds, 0);
     }
     assert.deepEqual(calls, ["daily recent"]);
     t.mock.timers.tick(12_000);
     const inProgress = await cache.read(false, original.revision);
     assert.ok("status" in inProgress && inProgress.status === "unchanged");
-    assert.deepEqual(inProgress.progress, { stage: "recentUsage", elapsedSeconds: 12 });
+    assert.equal(inProgress.progress?.stage, "recentUsage");
+    assert.equal(inProgress.progress?.elapsedSeconds, 12);
+    assert.ok(inProgress.progress?.window?.since);
     paused = false;
     gate.resolve();
     const updated = await complete(cache);
@@ -482,4 +493,28 @@ test("last usage refresh survives restart and advances only on a successful scan
     else process.env.XDG_CACHE_HOME = original;
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("extends the old bounded archive once without counting its dates twice", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: new Date("2026-11-02T16:00:00Z") });
+  const root = await mkdtemp(path.join(os.tmpdir(), "paseo-total-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const store = createUsageStore("UTC", root);
+  const cached = row("2026-10-31", 12);
+  await store.saveHistory("daily", { since: "2026-11-01", checkedAt: Date.now(), older: [cached] });
+  let olderScans = 0;
+  const history = createUsageHistory("UTC", new AbortController().signal, async (_kind, _zone, _signal, since, until) => {
+    if (until) {
+      assert.equal(since, undefined);
+      olderScans++;
+      return [row("2025-06-15", 8), cached];
+    }
+    return [row("2026-11-02", 40)];
+  }, store);
+  const days = await history.readDays("2026-11-02", undefined, "manual");
+  assert.equal(history.allDates, true);
+  assert.deepEqual(days.map((day) => day.period), ["2025-06-15", "2026-10-31", "2026-11-02"]);
+  assert.equal(rollupDays(days, "total")[0].totalTokens, 78);
+  await history.readDays("2026-11-02", undefined, "manual");
+  assert.equal(olderScans, 1);
 });

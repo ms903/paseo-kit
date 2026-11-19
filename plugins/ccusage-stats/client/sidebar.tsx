@@ -9,7 +9,7 @@ import {
   type LayoutChangeEvent,
   type PressableStateCallbackType,
 } from "react-native";
-import type { PeriodKind } from "../shared/usage";
+import type { PeriodKind, UsageView } from "../shared/usage";
 import { agentSegments, Legend, PaceBar, PERIOD_OPTIONS, PeriodBars, Segmented } from "./charts";
 import {
   TYPICAL_DAYS,
@@ -150,7 +150,7 @@ export function UsageSidebarItem({ theme, host, openPopover }: PluginSidebarItem
 
 export function UsagePopover({ theme, host, layout, openScreen }: PluginPopoverProps) {
   const { data, error, isPending, preview, progress } = useUsageReport(host.id);
-  const [requestedKind, setKind] = useState<PeriodKind>("daily");
+  const [requestedKind, setKind] = useState<UsageView>("daily");
   const [pickedKey, setPickedKey] = useState<string | null>(null);
   const rootStyle = {
     gap: 12,
@@ -177,13 +177,13 @@ export function UsagePopover({ theme, host, layout, openScreen }: PluginPopoverP
     );
   }
 
-  const kind = data[requestedKind].length ? requestedKind : "daily";
-  const options = PERIOD_OPTIONS.filter(({ value }) => data[value].length > 0);
-  const periods = data[kind].slice(-POPOVER_PERIODS[kind]);
+  const kind = requestedKind === "total" || data[requestedKind].length > 0 ? requestedKind : "daily";
+  const options = PERIOD_OPTIONS.filter(({ value }) => value === "total" || data[value].length > 0);
+  const periods = kind === "total" ? (data.total ? [data.total] : []) : data[kind].slice(-POPOVER_PERIODS[kind]);
   const typical = data.historyPending ? null : typicalDay(data.daily);
   const picked = periods.findIndex(({ period }) => period === pickedKey);
   const selected = picked < 0 ? periods.length - 1 : picked;
-  const changeKind = (next: PeriodKind) => {
+  const changeKind = (next: UsageView) => {
     setKind(next);
     setPickedKey(null);
   };
@@ -212,20 +212,28 @@ export function UsagePopover({ theme, host, layout, openScreen }: PluginPopoverP
           ))}
         </View>
       ) : null}
-      <PeriodBars
-        theme={theme}
-        kind={kind}
-        periods={periods}
-        order={data.agents}
-        selected={selected}
-        onSelect={(index) => setPickedKey(index === periods.length - 1 ? null : periods[index]?.period ?? null)}
-        height={52}
-        labelEvery={kind === "daily" ? 7 : kind === "weekly" ? 4 : 3}
-        today={data.today}
-      />
-      <Legend theme={theme} order={data.agents} periods={periods} />
+      {kind !== "total" ? (
+        <>
+          <PeriodBars
+            theme={theme}
+            kind={kind}
+            periods={periods}
+            order={data.agents}
+            selected={selected}
+            onSelect={(index) => setPickedKey(index === periods.length - 1 ? null : periods[index]?.period ?? null)}
+            height={52}
+            labelEvery={kind === "daily" ? 7 : kind === "weekly" ? 4 : 3}
+            today={data.today}
+          />
+          <Legend theme={theme} order={data.agents} periods={periods} />
+        </>
+      ) : null}
       <View style={{ height: 1, backgroundColor: theme.colors.border }} />
-      <AgentList theme={theme} order={data.agents} period={periods[selected]} />
+      {kind === "total" && !data.total ? (
+        <Text style={{ fontSize: FONT.body, color: theme.colors.foregroundMuted }}>
+          {data.refreshing ? "Collecting all-time usage…" : "All-time usage unavailable. Refresh usage to retry."}
+        </Text>
+      ) : <AgentList theme={theme} order={data.agents} period={periods[selected]} />}
       <Footer theme={theme} report={data} refresh={refresh} onMore={() => openScreen({
         screenId: "usage",
         params: pickedKey ? { kind, period: pickedKey } : { kind },

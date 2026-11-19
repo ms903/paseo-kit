@@ -2,7 +2,7 @@ import type { PluginTheme } from "@getpaseo/plugin";
 import { Icon } from "@getpaseo/plugin/client/react-native";
 import { useState } from "react";
 import { Pressable, Text, View, type PressableStateCallbackType, type TextStyle } from "react-native";
-import type { AgentUsage, PeriodKind, TodayPreview, Usage, UsagePeriod } from "../shared/usage";
+import type { AgentUsage, TodayPreview, Usage, UsagePeriod, UsageView } from "../shared/usage";
 import { ShareBar, SwatchDot, type ShareSegment } from "./charts";
 import { agentSwatch, foldAgents } from "./data";
 import {
@@ -49,7 +49,7 @@ export function Headline({
   today,
 }: {
   theme: PluginTheme;
-  kind: PeriodKind;
+  kind: UsageView;
   periods: readonly UsagePeriod[];
   index: number;
   today: string;
@@ -87,7 +87,7 @@ export function TokenChange({
   previous,
 }: {
   theme: PluginTheme;
-  kind: PeriodKind;
+  kind: UsageView;
   current: number;
   previous?: UsagePeriod;
 }) {

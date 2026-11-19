@@ -22,7 +22,7 @@ import {
 import { createReportPricer, type ReportPrices } from "./codex-prices";
 import { createPriceCatalog, type PriceCatalog } from "./price-catalog";
 import { createUsageHistory, oldestReportDay, REPORT_MONTHS, type RecentSessions, type RefreshMode } from "./usage-history";
-import { rollupDays } from "./usage-rows";
+import { emptyRow, rollupDays } from "./usage-rows";
 import { createUsageStore } from "./usage-store";
 
 // Minimum interval between automatic report scans.
@@ -147,8 +147,13 @@ function agentOrder(rows: RawRow[]): string[] {
     .map(([agent]) => agent);
 }
 
-function buildReport(raw: RawReport, timezone: string, today: string, generatedAt: number, sessions: SessionUsage[], from?: string): UsageReport {
+function buildReport(
+  raw: RawReport, timezone: string, today: string, generatedAt: number, sessions: SessionUsage[],
+  options: { from?: string; allDates: boolean },
+): UsageReport {
+  const { from, allDates } = options;
   const firstDay = from ?? oldestReportDay(today);
+  const total = allDates ? rollupDays(raw.daily.filter((row) => row.period <= today), "total")[0] : undefined;
   return {
     generatedAt,
     today,
@@ -157,6 +162,7 @@ function buildReport(raw: RawReport, timezone: string, today: string, generatedA
     daily: series("daily", raw.daily, today, from),
     weekly: series("weekly", raw.weekly, today, from),
     monthly: series("monthly", raw.monthly, today, from),
+    total: allDates ? periodOf(total ?? emptyRow("total", "all")) : undefined,
     recentSessions: [...sessions]
       .sort((a, b) => (b.lastActivity ?? "").localeCompare(a.lastActivity ?? ""))
       .slice(0, RECENT_SESSIONS),
@@ -186,9 +192,10 @@ export function createReportCache(scan = runCcusage, cacheDirectory?: string): R
   const priceCatalog = createPriceCatalog(signal);
   const preparePrices = createReportPricer(undefined, store);
   const readAntigravity = createAntigravityReport(store);
-  const history = createUsageHistory(timezone, signal, scan, store, (kind, archived) => {
-    if (kind === "daily") startStage(archived ? "dailyHistory" : "recentUsage");
-    else startStage(archived ? "sessionHistory" : "recentSessions");
+  const history = createUsageHistory(timezone, signal, scan, store, (kind, since, until) => {
+    const window = { since, until };
+    if (kind === "daily") startStage(until ? "dailyHistory" : "recentUsage", window);
+    else startStage(until ? "sessionHistory" : "recentSessions", window);
   });
   let snapshot: Snapshot | undefined;
   const instance = randomUUID();
@@ -205,10 +212,17 @@ export function createReportCache(scan = runCcusage, cacheDirectory?: string): R
   let priceUpdate: Promise<ReportResponse> | null = null;
   let pricesChanged = false;
   let manualRequested = false;
-  let stage: { name: ScanProgress["stage"]; start: number } | undefined;
+  let stage: { name: ScanProgress["stage"]; start: number; window?: ScanProgress["window"] } | undefined;
+  const codexReads = new Set<string>();
 
-  function startStage(name: ScanProgress["stage"]) {
+  function startStage(name: ScanProgress["stage"], window?: ScanProgress["window"]) {
     if (stage?.name !== name) stage = { name, start: Date.now() };
+    stage.window = window;
+  }
+
+  function trackCodexRead(id: string) {
+    codexReads.add(id);
+    return () => { codexReads.delete(id); };
   }
 
   async function publish(
@@ -219,14 +233,18 @@ export function createReportCache(scan = runCcusage, cacheDirectory?: string): R
     const base: RawReport = { daily, weekly: [], monthly: [], session: lifetimeSessions };
     prices(base, options.sessionsKnownFrom);
     if (signal.aborted) throw new Error("Usage scan cancelled");
-    base.weekly = rollupDays(daily, "weekly");
-    base.monthly = rollupDays(daily, "monthly");
+    const oldestDay = oldestReportDay(today);
+    const calendarDays = daily.filter((row) => row.period >= oldestDay);
+    base.weekly = rollupDays(calendarDays, "weekly");
+    base.monthly = rollupDays(calendarDays, "monthly");
     const raw = mergeAntigravity(base, antigravity);
     const sessions = raw.session.map(sessionOf);
     if ((sessionsPending || options.sessionError) && !base.session.length && snapshot) {
       sessions.push(...snapshot.sessions.filter((row) => row.agent !== "antigravity"));
     }
-    const report = buildReport(raw, timezone, today, Date.now(), sessions, options.from);
+    const report = buildReport(raw, timezone, today, Date.now(), sessions, {
+      from: options.from, allDates: !options.from && history.allDates,
+    });
     if (options.from) report.historyPending = true;
     if (sessionsPending) report.sessionsPending = true;
     report.sessionRefreshError = options.sessionError ?? null;
@@ -259,7 +277,7 @@ export function createReportCache(scan = runCcusage, cacheDirectory?: string): R
         }
         recentSessions = await history.prepareSessions(today, mode);
         const window = recentSessions.window;
-        recentPrices = await preparePrices(window?.recent ?? [], timezone, catalog, signal, ["daily"]);
+        recentPrices = await preparePrices(window?.recent ?? [], timezone, catalog, signal, ["daily"], trackCodexRead);
         if (needsCalendar) {
           await publish(today, structuredClone(recent), [], antigravity, recentPrices, {
             from: since, sessionsKnownFrom: window?.since ?? tomorrow, sessionError: recentSessions.error?.message,
@@ -294,7 +312,7 @@ export function createReportCache(scan = runCcusage, cacheDirectory?: string): R
         const rows = session.rows;
         const incomplete = !!session.error && !rows.length;
         const source = incomplete ? session.pricingWindow?.recent ?? [] : rows;
-        const prices = await preparePrices(source, timezone, catalog, signal, ["daily", "session"]);
+        const prices = await preparePrices(source, timezone, catalog, signal, ["daily", "session"], trackCodexRead);
         await publish(today, daily, rows, antigravity, prices, {
           sessionError: session.error, refreshed,
           sessionsKnownFrom: incomplete ? session.pricingWindow?.since ?? tomorrow : undefined,
@@ -358,7 +376,11 @@ export function createReportCache(scan = runCcusage, cacheDirectory?: string): R
       manualRequested = true;
     }
     await current();
-    const progress = stage && { stage: stage.name, elapsedSeconds: Math.max(0, Math.floor((Date.now() - stage.start) / 1000)) };
+    const progress = stage && {
+      stage: stage.name, elapsedSeconds: Math.max(0, Math.floor((Date.now() - stage.start) / 1000)),
+      ...(stage.window ? { window: stage.window } : {}),
+      ...(codexReads.size ? { codexSessions: [...codexReads] } : {}),
+    };
     if (snapshot) {
       const revision = `${instance}:${version}`;
       const status = { revision, generatedAt: snapshot.report.generatedAt, usageRefreshedAt: snapshot.report.usageRefreshedAt, refreshing: running, refreshError, progress };
