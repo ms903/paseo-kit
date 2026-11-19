@@ -14,13 +14,14 @@ interface Price {
   fromJanuary2027?: Rate;
   above100k?: Rate;
 }
-// Official standard API rates, checked 2026-11-17:
+// Official standard API rates:
 // https://aistudio.google.com/docs/pricing
 // https://platform.claude.com/docs/en/about-claude/pricing
 export const ANTIGRAVITY_PRICES: Record<string, Price> = {
   "gemini-4-carbon": { base: [2, 10, 0.1], fromDecember2026: [4, 20, 0.2] },
   "gemini-4-argon": { base: [2, 10, 0.1], fromDecember2026: [4, 20, 0.2] },
   "gemini-4-hydrogen": { base: [1.5, 7.5, 0.075] },
+  "gemini-4-neon": { base: [3, 15, 0.15] },
   "gemini-3.1-pro": { base: [2, 12, 0.2], long: [4, 18, 0.4] },
   "gemini-3-pro": { base: [2, 12, 0.2], long: [4, 18, 0.4] },
   "gemini-3-flash": { base: [0.5, 3, 0.05] },

@@ -22,8 +22,8 @@ ccusage is bundled with the plugin, so nothing needs to be on the daemon's `PATH
 
 Days and weeks use the daemon's timezone, and weeks start on Monday. The daemon reads usage from
 local logs. **Update prices** in Token usage fetches the public Models.dev catalog and recalculates
-the report. The daemon saves the catalog for later reports. GPT-6.2 Sol, GPT-6.2 Astra and Gemini 4
-Hydrogen have built-in rates.
+the report. The daemon saves the catalog for later reports. GPT-6.2 Sol, GPT-6.2 Astra, Gemini 4
+Hydrogen, and Gemini 4 Neon have built-in rates.
 
 Antigravity app, IDE and CLI are included. The plugin reads generation metadata from
 `~/.gemini/antigravity*/conversations/*.db`, including committed WAL updates, and groups

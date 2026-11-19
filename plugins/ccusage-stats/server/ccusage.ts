@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile, type ExecFileException } from "node:child_process";
 import { accessSync, constants, readFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -105,6 +105,22 @@ export type RawAgentRow = z.infer<typeof rawAgentRow>;
 export type RawRow = z.infer<typeof rawRow>;
 export type RawReport = z.infer<typeof rawReport>;
 
+export function describeCcusageFailure(
+  { code, killed, signal }: Pick<ExecFileException, "code" | "killed" | "signal">,
+  stderr: string,
+): string {
+  if (code === "ENOENT") return "ccusage executable was not found";
+  if (code === "EACCES" || code === "EPERM") return "Permission denied when starting ccusage";
+  if (code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER") return "ccusage output exceeded the size limit";
+  if (code === "ABORT_ERR") return "ccusage was cancelled";
+  if (killed && signal === "SIGTERM") return `ccusage timed out after ${RUN_TIMEOUT_MS / 1000} seconds`;
+  if (signal) return `ccusage was terminated (${signal})`;
+
+  const status = code == null ? "ccusage exited" : `ccusage exited (${code})`;
+  const detail = stderr.trim().split(/\r?\n/).slice(-3).join(" ").slice(0, 280);
+  return detail ? `${status}. ${detail}` : status;
+}
+
 /** One ccusage run loads the agent logs and emits all sections. */
 export function runCcusage(timezone: string, signal?: AbortSignal): Promise<RawReport> {
   const binary = locateCcusage();
@@ -126,16 +142,14 @@ export function runCcusage(timezone: string, signal?: AbortSignal): Promise<RawR
         timeout: RUN_TIMEOUT_MS,
         maxBuffer: MAX_OUTPUT_BYTES,
         signal,
-        env: { ...process.env, NO_COLOR: "1" },
+        // The plugin's reader already supplies the Antigravity rows. An empty override tells
+        // ccusage to skip its own scan, including its second pass for the session section.
+        env: { ...process.env, NO_COLOR: "1", ANTIGRAVITY_DATA_DIR: "" },
         windowsHide: true,
       },
       (error, stdout, stderr) => {
         if (error) {
-          const missing = (error as NodeJS.ErrnoException).code === "ENOENT";
-          const detail = missing
-            ? `ccusage not found (looked for the bundled ${NATIVE_PACKAGE} binary and PATH)`
-            : `ccusage failed: ${stderr.trim().split("\n").slice(-3).join(" ") || error.message}`;
-          reject(new Error(detail));
+          reject(new Error(describeCcusageFailure(error, stderr)));
           return;
         }
         try {

@@ -197,11 +197,14 @@ export function createReportCache(): ReportCache {
       const seen = invalidations;
       try {
         const prices = priceCatalog.read();
-        const [base, antigravity, catalog] = await Promise.all([
+        const scans = [
           runCcusage(timezone, lifetime.signal),
           antigravityReport(timezone, lifetime.signal, undefined, prices),
           prices,
-        ]);
+        ] as const;
+        const [base, antigravity, catalog] = await Promise.all(scans).finally(
+          () => Promise.allSettled(scans),
+        );
         await applyPrices(base, timezone, catalog, lifetime.signal);
         const raw = mergeAntigravity(base, antigravity);
         const next = {
@@ -214,6 +217,7 @@ export function createReportCache(): ReportCache {
         refreshError = null;
         return next;
       } catch (error) {
+        attemptedAt = Date.now();
         refreshError = (error as Error).message;
         if (!lifetime.signal.aborted) console.error(`[ccusage-stats] ${refreshError}`);
         throw error;
@@ -245,7 +249,11 @@ export function createReportCache(): ReportCache {
         await priceCatalog.update();
         // Let a report started with the previous prices finish before replacing it.
         await inflight?.catch(() => undefined);
-        return (await refresh()).report;
+        const { report } = await refresh().catch((error) => {
+          if (!snapshot) throw error;
+          return snapshot;
+        });
+        return { ...report, refreshError };
       })().finally(() => {
         priceUpdate = null;
       });

@@ -210,6 +210,37 @@ test("prices Hydrogen for the base ID, Extra thinking, and the model label", asy
   }
 });
 
+test("counts new Neon turns in an existing conversation on their own Hong Kong date", async () => {
+  const f = await fixture();
+  const beforeMidnight = Date.parse("2026-11-19T15:45:00Z") / 1000;
+  const afterMidnight = Date.parse("2026-11-19T16:15:00Z") / 1000;
+  try {
+    f.insert(1, generation(99_900, 20_000, 50_000, beforeMidnight, "gemini-4-neon", ""));
+    const before = await antigravityReport("Asia/Hong_Kong", undefined, f.root);
+    assert.deepEqual(before.daily.map((row) => row.period), ["2026-11-19"]);
+
+    const call = generation(99_900, 20_000, 50_000, 0, "gemini-4-neon-xhigh", "Gemini 4 Neon (Extra)");
+    f.insert(2, Buffer.concat([call, num(2, 41)]));
+    f.insert(3, Buffer.concat([call, msg(2, Buffer.concat([vi(50), vi(52)]))]));
+    const step = f.db.prepare("INSERT INTO steps VALUES(?,?)");
+    step.run(2, msg(1, num(1, beforeMidnight)));
+    step.run(41, Buffer.concat([msg(1, num(1, beforeMidnight)), msg(8, num(1, afterMidnight))]));
+    step.run(52, msg(8, num(1, afterMidnight + 60)));
+
+    const after = await antigravityReport("Asia/Hong_Kong", undefined, f.root);
+    const today = after.daily.find((row) => row.period === "2026-11-20");
+    assert.equal(after.daily.find((row) => row.period === "2026-11-19")?.totalTokens, 170_000);
+    assert.equal(today?.totalTokens, 340_000);
+    assert.ok(today && Math.abs(today.totalCost - 1.215) < 1e-10);
+    assert.deepEqual(today?.modelBreakdowns.map((model) => model.modelName), ["gemini-4-neon"]);
+    assert.equal(after.session[0].period, before.session[0].period);
+    assert.equal(after.session[0].totalTokens, 510_000);
+    assert.equal(after.session[0].metadata?.lastActivity, "2026-11-19T16:16:00.000Z");
+  } finally {
+    await f.cleanup();
+  }
+});
+
 test("prices a new Antigravity model when the catalog publishes it", async () => {
   const f = await fixture();
   try {
