@@ -37,12 +37,12 @@ const stageLabels: Record<ScanProgress["stage"], string> = {
   totals: "Calculating usage totals",
 };
 
-export function formatScanProgress({ stage, elapsedSeconds, window, codexSessions }: ScanProgress): string {
+export function formatScanProgress({ stage, elapsedSeconds, window: bounds, codexSessions }: ScanProgress): string {
   let label = stageLabels[stage];
   if (codexSessions?.length) {
     label = `Reading Codex sessions · ${codexSessions.join(", ")}`;
-  } else if (window) {
-    const dates = [window.since && `from ${longDay.format(dateOf(window.since))}`, window.until && `through ${longDay.format(dateOf(window.until))}`];
+  } else if (bounds) {
+    const dates = [bounds.since && `from ${longDay.format(dateOf(bounds.since))}`, bounds.until && `through ${longDay.format(dateOf(bounds.until))}`];
     label += ` · ccusage ${dates.filter(Boolean).join(" ")}`.trimEnd();
   }
   if (elapsedSeconds < 5) return label + "…";
