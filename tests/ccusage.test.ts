@@ -27,24 +27,24 @@ function row(period: string, tokens: number, agent = "codex"): RawRow {
   };
 }
 
-test("replaces the recent window and reconciles older days after seven days", async (t) => {
+test("replaces the recent window and reconciles older days after thirty days", async (t) => {
   t.mock.timers.enable({ apis: ["Date"], now: new Date("2026-11-01T16:30:00Z") });
   const bounds: (string | undefined)[][] = [];
   const history = createUsageHistory("Asia/Hong_Kong", new AbortController().signal, async (kind, _tz, _signal, since, until) => {
     assert.equal(kind, "daily");
     bounds.push([since, until]);
     if (until) return [row("2025-11-30", 123), row("2026-10-31", bounds.length === 2 ? 1 : 12)];
-    if (since === "2026-11-08") return [];
-    return bounds.length === 1 ? [row("2026-11-01", 3), row("2026-11-02", 5)] : [row("2026-11-02", 8)];
+    if (since === "2026-12-02") return [];
+    return [row("2026-11-02", bounds.length === 1 ? 5 : 8)];
   });
   const first = await history.readDays("2026-11-02");
   first[0].modelBreakdowns[0].cost = 50;
   assert.deepEqual(await history.readDays("2026-11-02"), [row("2025-11-30", 123), row("2026-10-31", 1), row("2026-11-02", 8)]);
-  t.mock.timers.tick(7 * 24 * 3_600_000);
-  assert.deepEqual(await history.readDays("2026-11-09"), [row("2025-11-30", 123), row("2026-10-31", 12)]);
+  t.mock.timers.tick(30 * 24 * 3_600_000);
+  assert.deepEqual(await history.readDays("2026-12-02"), [row("2025-11-30", 123), row("2026-10-31", 12)]);
   assert.deepEqual(bounds, [
-    ["2026-11-01", undefined], [undefined, "2026-10-31"], ["2026-11-01", undefined],
-    ["2026-11-08", undefined], [undefined, "2026-11-07"],
+    ["2026-11-02", undefined], [undefined, "2026-11-01"], ["2026-11-02", undefined],
+    ["2026-12-02", undefined], [undefined, "2026-12-01"],
   ]);
 });
 
@@ -86,7 +86,7 @@ test("session scans keep the previous lifetime totals after a failure and back o
   const history = createUsageHistory("Asia/Hong_Kong", new AbortController().signal, async (kind, _tz, _signal, since, until) => {
     assert.equal(kind, "session");
     if (until) return [];
-    assert.equal(since, "2026-11-19");
+    assert.equal(since, "2026-11-20");
     if (++calls === 2) throw new Error("session timeout");
     t.mock.timers.tick(70_000);
     return [row("resumed", calls)];
@@ -162,7 +162,7 @@ test("report and session RPCs return during a slow cold scan, then restore a dis
   assert.equal(initial.daily.at(-1)?.usage.totalTokens, 86);
   assert.equal(initial.daily.at(-1)?.usage.cost, 8);
   assert.equal(initial.historyPending, true);
-  assert.equal(initial.daily.length, 2);
+  assert.equal(initial.daily.length, 1);
   assert.deepEqual(initial.weekly, []);
   assert.deepEqual(initial.monthly, []);
   assert.equal(initial.total, undefined);
@@ -222,6 +222,8 @@ test("report and session RPCs return during a slow cold scan, then restore a dis
   assert.equal(restored.generatedAt, first.generatedAt);
   assert.equal(restored.recentSessions[0].usage.totalTokens, 492);
   assert.deepEqual(restored.total, first.total);
+  assert.deepEqual(warmCalls, []);
+  await restarted.read(true);
   resume();
   const next = await complete(restarted);
   assert.equal(next.daily.at(-1)?.usage.totalTokens, 106);
@@ -285,7 +287,7 @@ test("a cold failure is reported without repeated scans, then saves the availabl
     const saved = await createUsageStore(calendar.timezone, root).readReport();
     assert.equal(saved?.sessionRefreshError, "session scan failed");
     assert.equal(saved?.daily.at(-1)?.usage.inputTokens, 200);
-    t.mock.timers.tick(60_001);
+    t.mock.timers.tick(45 * 60_000);
     const recovered = await complete(cache);
     assert.equal(recovered.sessionRefreshError, null);
     assert.equal(recovered.recentSessions[0].id, "resumed");
@@ -347,10 +349,10 @@ test("manual refresh coalesces clicks, reuses archives, checks changed sessions 
   let recent = 80;
   let paused = false;
   const gate = Promise.withResolvers<void>();
-  const cache = createReportCache(async (kind, tz, _signal, _since, until) => {
-    calls.push(`${kind} ${until ? "archive" : "recent"}`);
+  const cache = createReportCache(async (kind, tz, _signal, since, until) => {
+    calls.push(`${kind} ${until ? (since ? "catch-up" : "archive") : "recent"}`);
     if (paused && kind === "daily") await gate.promise;
-    if (until) return kind === "session" ? [row("resumed", 400)] : [];
+    if (until) return !since && kind === "session" ? [row("resumed", 400)] : [];
     return [row(kind === "session" ? "resumed" : localToday(tz), recent)];
   }, root);
   try {
@@ -393,11 +395,11 @@ test("manual refresh coalesces clicks, reuses archives, checks changed sessions 
     assert.ok(!("status" in newClient) && newClient.revision === identical.revision);
 
     calls.length = 0;
-    t.mock.timers.tick(8 * 86_400_000);
+    t.mock.timers.tick(31 * 86_400_000);
     await cache.read(true);
     await complete(cache);
-    assert.deepEqual(calls, ["daily recent", "session recent"]);
-    t.mock.timers.tick(61_000);
+    assert.deepEqual(calls, ["daily catch-up", "daily recent", "session catch-up", "session recent"]);
+    t.mock.timers.tick(45 * 60_000);
     await complete(cache);
     assert.ok(calls.includes("daily archive") && calls.includes("session archive"));
     assert.equal(requests.mock.callCount(), 0);
@@ -517,4 +519,77 @@ test("extends the old bounded archive once without counting its dates twice", as
   assert.equal(rollupDays(days, "total")[0].totalTokens, 78);
   await history.readDays("2026-11-02", undefined, "manual");
   assert.equal(olderScans, 1);
+});
+
+test("manual usage refresh restarts the 45-minute automatic cooldown at completion", async (t) => {
+  const interval = 45 * 60_000;
+  t.mock.timers.enable({ apis: ["Date"], now: new Date("2026-11-20T08:00:00Z") });
+  const root = await mkdtemp(path.join(os.tmpdir(), "paseo-refresh-interval-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  let dailyScans = 0;
+  const cache = createReportCache(async (kind, tz, _signal, since, until) => {
+    if (until || kind === "session") return [];
+    assert.equal(since, localToday(tz));
+    dailyScans++;
+    t.mock.timers.tick(180_000); // A slow native scan takes three minutes.
+    return [row(localToday(tz), 100)];
+  }, root);
+  t.after(() => cache.stop());
+  await complete(cache);
+  assert.equal(dailyScans, 1);
+
+  t.mock.timers.tick(20 * 60_000);
+  await Promise.all([cache.read(), cache.sessions()]);
+  assert.equal(dailyScans, 1);
+  await cache.read(true);
+  const manual = await complete(cache);
+  assert.equal(dailyScans, 2);
+
+  t.mock.timers.tick(interval - 1);
+  await Promise.all([cache.read(), cache.sessions(), cache.read()]);
+  assert.equal(dailyScans, 2);
+  t.mock.timers.tick(1);
+  const automatic = await complete(cache);
+  assert.equal(dailyScans, 3);
+  assert.equal(automatic.usageRefreshedAt, manual.usageRefreshedAt! + interval + 180_000);
+});
+
+test("moves completed days to the archive once and preserves resumed session totals", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: new Date("2026-11-20T08:00:00Z") });
+  const root = await mkdtemp(path.join(os.tmpdir(), "paseo-rolling-history-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const calls: [string, string | undefined, string | undefined][] = [];
+  const scan: Parameters<typeof createUsageHistory>[2] = async (kind, _tz, _signal, since, until) => {
+    calls.push([kind, since, until]);
+    if (!since) return [row(kind === "daily" ? "2026-11-19" : "resumed", 40)];
+    if (until) return [row(kind === "daily" ? "2026-11-20" : "resumed", 20)];
+    return [row(kind === "daily" ? since : "resumed", 10)];
+  };
+  const open = () => createUsageHistory("UTC", new AbortController().signal, scan, createUsageStore("UTC", root));
+  const history = open();
+  await history.readDays("2026-11-20");
+  await history.readSessions("2026-11-20");
+  t.mock.timers.tick(2 * 86_400_000);
+  calls.length = 0;
+  const days = await history.readDays("2026-11-22");
+  const sessions = await history.readSessions("2026-11-22");
+  assert.deepEqual(days.map(({ period }) => period), ["2026-11-19", "2026-11-20", "2026-11-22"]);
+  assert.equal(sessions.rows[0].inputTokens, 70);
+  assert.deepEqual(calls, [
+    ["daily", "2026-11-20", "2026-11-21"],
+    ["daily", "2026-11-22", undefined],
+    ["session", "2026-11-20", "2026-11-21"],
+    ["session", "2026-11-22", undefined],
+  ]);
+  calls.length = 0;
+  t.mock.timers.tick(45 * 60_000);
+  assert.deepEqual(await history.readDays("2026-11-22"), days);
+  assert.equal((await history.readSessions("2026-11-22")).rows[0].inputTokens, 70);
+  assert.deepEqual(calls, [["daily", "2026-11-22", undefined]]);
+
+  calls.length = 0;
+  const restored = open();
+  assert.deepEqual(await restored.readDays("2026-11-22"), days);
+  assert.equal((await restored.readSessions("2026-11-22")).rows[0].inputTokens, 70);
+  assert.deepEqual(calls, [["daily", "2026-11-22", undefined], ["session", "2026-11-22", undefined]]);
 });

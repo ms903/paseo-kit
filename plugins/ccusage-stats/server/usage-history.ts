@@ -5,7 +5,7 @@ import type { SavedHistory, UsageStore } from "./usage-store";
 
 export const REPORT_MONTHS = 12;
 const MINUTE = 60_000;
-const HISTORY_REFRESH_MS = 7 * 24 * 60 * MINUTE;
+const HISTORY_REFRESH_MS = 30 * 24 * 60 * MINUTE;
 const MAX_RETRY_MS = 15 * MINUTE;
 
 export type RefreshMode = "auto" | "manual" | "prices";
@@ -59,10 +59,29 @@ export function createUsageHistory(
     const needsAllDates = kind === "daily" && !usable?.allDates;
     const archiveExpired = mode !== "manual" && now >= (usable?.checkedAt ?? 0) + HISTORY_REFRESH_MS;
     const rebuild = !usable || (now >= retryAt[kind] && (needsAllDates || archiveExpired));
-    const since = rebuild ? previousDay(today) : usable.since;
+    let base = usable;
+    if (usable && !rebuild && usable.since < today && (mode === "manual" || now >= retryAt[kind])) {
+      // Seal missed days once. Subsequent scans read only the current day, even during a long session.
+      const until = previousDay(today);
+      try {
+        onScan?.(kind, usable.since, until);
+        const finished = await scan(kind, timezone, signal, usable.since, until);
+        if (signal.aborted) throw new Error("Usage scan cancelled");
+        const older = kind === "daily"
+          ? usable.older.concat(finished.filter((row) => row.period >= usable.since && row.period < today))
+          : joinSessions(usable.older, finished);
+        base = { ...usable, older, since: today };
+        saved.set(kind, base);
+        await store?.saveHistory(kind, base);
+      } catch (error) {
+        retryAt[kind] = Date.now() + MAX_RETRY_MS;
+        throw error;
+      }
+    }
+    const since = rebuild ? today : base!.since;
     onScan?.(kind, since);
     const recent = await scan(kind, timezone, signal, since);
-    return { since, recent, usable, rebuild };
+    return { since, recent, usable: base, rebuild };
   }
 
   async function readWindow(kind: ScanKind, window: UsageWindow) {
@@ -93,7 +112,7 @@ export function createUsageHistory(
     const { older } = base;
     if (kind === "daily") {
       recent = recent.filter((row) => row.period >= base.since);
-      dailySignature = createHash("sha256").update(String(base.checkedAt)).update(JSON.stringify(recent)).digest("hex");
+      dailySignature = createHash("sha256").update(`${base.since}:${base.checkedAt}:`).update(JSON.stringify(recent)).digest("hex");
       return older.concat(recent);
     }
     return joinSessions(older, recent);

@@ -25,12 +25,8 @@ import { createUsageHistory, oldestReportDay, REPORT_MONTHS, type RecentSessions
 import { emptyRow, rollupDays } from "./usage-rows";
 import { createUsageStore } from "./usage-store";
 
-// Minimum interval between automatic report scans.
-const FRESH_MS = 60_000;
-// Coalesce bursts of finished turns into one refresh.
-const INVALIDATE_DEBOUNCE_MS = 4_000;
-// Only refresh eagerly after a turn when someone looked at the numbers recently.
-const ACTIVE_READER_MS = 15 * 60_000;
+const AUTO_REFRESH_MS = 45 * 60_000;
+const MAX_RETRY_DELAY_MS = 3 * 60 * 60_000;
 const SERIES_LENGTH = { daily: 30, weekly: 12, monthly: REPORT_MONTHS } as const;
 const RECENT_SESSIONS = 12;
 const DAY_MS = 86_400_000;
@@ -180,7 +176,6 @@ export interface ReportCache {
   read(refresh: boolean | undefined, knownRevision: string | undefined): Promise<UsageRead>;
   updatePrices(): Promise<ReportResponse>;
   sessions(): Promise<SessionUsage[]>;
-  invalidate(): void;
   stop(): void;
 }
 
@@ -207,8 +202,6 @@ export function createReportCache(scan = runCcusage, cacheDirectory?: string): R
   let nextRefreshAt = 0;
   let failures = 0;
   let refreshError: string | null = null;
-  let lastReadAt = 0;
-  let debounce: ReturnType<typeof setTimeout> | null = null;
   let priceUpdate: Promise<ReportResponse> | null = null;
   let pricesChanged = false;
   let manualRequested = false;
@@ -255,7 +248,6 @@ export function createReportCache(scan = runCcusage, cacheDirectory?: string): R
   }
 
   async function refresh(mode: RefreshMode) {
-    const start = Date.now();
     const today = localToday(timezone);
     const previousReads = history.dailyReads;
     startStage(mode === "prices" ? "totals" : "recentUsage");
@@ -319,39 +311,45 @@ export function createReportCache(scan = runCcusage, cacheDirectory?: string): R
         });
         rendered = { history: history.revision, antigravity, catalog };
       }
-      failures = 0;
-      refreshError = null;
-      nextRefreshAt = today === localToday(timezone)
-        ? Date.now() + Math.min(15 * FRESH_MS, Math.max(FRESH_MS, (Date.now() - start) * 2)) : 0;
+      if (history.dailyReads !== previousReads) {
+        refreshError = null;
+        failures = 0;
+        nextRefreshAt = Date.now() + AUTO_REFRESH_MS;
+      }
     } catch (error) {
       if (!signal.aborted) {
         failures = Math.min(failures + 1, 5);
-        const delay = Math.max(FRESH_MS * 2 ** (failures - 1), (Date.now() - start) * 2);
-        nextRefreshAt = Date.now() + Math.min(15 * FRESH_MS, delay);
+        const delay = Math.min(MAX_RETRY_DELAY_MS, AUTO_REFRESH_MS * 2 ** (failures - 1));
+        nextRefreshAt = Date.now() + delay;
         refreshError = (error as Error).message;
         console.error(`[ccusage-stats] ${refreshError}`);
       }
     } finally {
       stage = undefined;
       running = false;
-      if (pricesChanged) {
-        nextRefreshAt = 0;
-        schedule();
-      }
+      if (pricesChanged) schedule();
     }
   }
 
   function schedule() {
-    if (!restored || running || signal.aborted || Date.now() < nextRefreshAt) return;
-    running = true;
+    if (!restored || running || signal.aborted) return;
     const mode = manualRequested ? "manual" : pricesChanged ? "prices" : "auto";
+    if (mode === "auto") {
+      const now = Date.now();
+      if (now < nextRefreshAt) return;
+      const report = snapshot?.report;
+      const lastChecked = report?.usageRefreshedAt;
+      // Reuse a fresh, complete report even after the daemon restarts.
+      if (report?.total && !report.sessionsPending && !report.sessionRefreshError &&
+        lastChecked !== undefined && lastChecked <= now && now - lastChecked < AUTO_REFRESH_MS) return;
+    }
+    running = true;
     manualRequested = false;
     pricesChanged = false;
     void refresh(mode);
   }
 
   async function current() {
-    lastReadAt = Date.now();
     // Give a local cache hit one short read on the first request. Log scans never hold the RPC.
     startup ??= new Promise<void>((resolve) => {
       const timer = setTimeout(resolve, 100);
@@ -371,10 +369,7 @@ export function createReportCache(scan = runCcusage, cacheDirectory?: string): R
   function read(force?: boolean): Promise<ReportResponse>;
   function read(force: boolean | undefined, knownRevision: string | undefined): Promise<UsageRead>;
   async function read(force = false, knownRevision?: string): Promise<UsageRead> {
-    if (force && !running) {
-      nextRefreshAt = 0;
-      manualRequested = true;
-    }
+    if (force && !running) manualRequested = true;
     await current();
     const progress = stage && {
       stage: stage.name, elapsedSeconds: Math.max(0, Math.floor((Date.now() - stage.start) / 1000)),
@@ -396,7 +391,6 @@ export function createReportCache(scan = runCcusage, cacheDirectory?: string): R
       priceUpdate ??= (async () => {
         await priceCatalog.update();
         pricesChanged = true;
-        nextRefreshAt = 0;
         return read();
       })().finally(() => { priceUpdate = null; });
       return priceUpdate;
@@ -405,16 +399,6 @@ export function createReportCache(scan = runCcusage, cacheDirectory?: string): R
       await current();
       return snapshot?.sessions ?? [];
     },
-    invalidate() {
-      if (debounce) clearTimeout(debounce);
-      debounce = setTimeout(() => {
-        debounce = null;
-        if (Date.now() - lastReadAt < ACTIVE_READER_MS) schedule();
-      }, INVALIDATE_DEBOUNCE_MS);
-    },
-    stop() {
-      if (debounce) clearTimeout(debounce);
-      lifetime.abort();
-    },
+    stop() { lifetime.abort(); },
   };
 }

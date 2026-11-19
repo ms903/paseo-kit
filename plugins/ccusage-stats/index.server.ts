@@ -18,10 +18,9 @@ export default function contribute(server: PluginServerContext) {
   server.handle(usageReportRpc, ({ refresh, retry, knownRevision }) => cache.read(refresh || retry, knownRevision));
   server.handle(updatePricesRpc, () => cache.updatePrices());
   server.handle(sessionUsageRpc, (input, { paseo }) => matcher.resolve(input, paseo));
-  // A finished turn has written new usage to the agent's logs.
+  // A finished turn may establish a provider session id.
   server.on("agent.turn_ended", (event) => {
     matcher.forget(event.agent.id);
-    cache.invalidate();
   });
   return () => cache.stop();
 }

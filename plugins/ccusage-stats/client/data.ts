@@ -11,8 +11,8 @@ import {
   type ReportResponse,
 } from "../shared/usage";
 
-const REPORT_REFRESH_MS = 30_000;
-const SESSION_REFRESH_MS = 20_000;
+const REPORT_REFRESH_MS = 2 * 60_000;
+const SESSION_REFRESH_MS = 60_000;
 export const USAGE_REPORT_KEY = ["usage-report"] as const;
 export const SESSION_USAGE_KEY = ["session-usage"] as const;
 
@@ -51,9 +51,9 @@ export function useUsageReport(hostId: string) {
     retry: false,
     refetchInterval: ({ state: { data, error } }) => {
       if (error || !data) return REPORT_REFRESH_MS;
-      if ("status" in data) return data.status === "today" && data.refreshError ? REPORT_REFRESH_MS : 2_000;
+      if ("status" in data) return data.status === "today" && data.refreshError ? REPORT_REFRESH_MS : 5_000;
       if (!data.refreshing) return REPORT_REFRESH_MS;
-      return (data.progress?.elapsedSeconds ?? 0) >= 15 ? 10_000 : 3_000;
+      return (data.progress?.elapsedSeconds ?? 0) >= 30 ? 15_000 : 5_000;
     },
     staleTime: REPORT_REFRESH_MS / 2,
   });
