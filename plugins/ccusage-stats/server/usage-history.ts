@@ -1,49 +1,81 @@
-import { runCcusage, type RawRow } from "./ccusage";
+import { createHash } from "node:crypto";
+import { runCcusage, type RawRow, type ScanKind } from "./ccusage";
+import { joinSessions } from "./usage-rows";
+import type { SavedHistory, UsageStore } from "./usage-store";
 
 const MINUTE = 60_000;
-const HISTORY_REFRESH_MS = 6 * 60 * MINUTE;
+const HISTORY_REFRESH_MS = 7 * 24 * 60 * MINUTE;
 const MAX_RETRY_MS = 15 * MINUTE;
 
-export function createUsageHistory(timezone: string, signal: AbortSignal, scan = runCcusage) {
-  let history: { since: string; older: RawRow[]; refreshAt: number } | undefined;
+function previousDay(day: string): string {
+  const date = new Date(day + "T00:00:00Z");
+  date.setUTCDate(date.getUTCDate() - 1);
+  return date.toISOString().slice(0, 10);
+}
+
+export function createUsageHistory(timezone: string, signal: AbortSignal, scan = runCcusage, store?: UsageStore) {
+  const saved = new Map<ScanKind, SavedHistory | undefined>();
+  const retryAt = { daily: 0, session: 0 };
   let sessions: RawRow[] = [];
   let sessionError: string | null = null;
   let nextSessionAt = 0;
   let sessionFailures = 0;
+  let dailySignature: string | undefined;
+  let sessionSignature: string | undefined;
+  let verifySessionsAt = 0;
+  let sessionRevision = 0;
+  let lastDays: { today: string; recent: RawRow[] } | undefined;
 
-  async function readDays(today: string): Promise<RawRow[]> {
-    if (!history || Date.now() >= history.refreshAt || today < history.since) {
+  async function readWindow(kind: ScanKind, today: string, onRecent?: (rows: RawRow[]) => void) {
+    if (!saved.has(kind)) saved.set(kind, await store?.readHistory(kind));
+    const old = saved.get(kind);
+    const now = Date.now();
+    const usable = old && old.since <= today && old.checkedAt <= now ? old : undefined;
+    const rebuild = !usable || (now >= usable.checkedAt + HISTORY_REFRESH_MS && now >= retryAt[kind]);
+    // Both scans use the same boundary even if the clock crosses midnight between them.
+    const since = rebuild ? previousDay(today) : usable.since;
+    let recent = await scan(kind, timezone, signal, since);
+    onRecent?.(recent);
+    let base = usable;
+    if (rebuild) {
       try {
-        const days = await scan("daily", timezone, signal);
-        const yesterday = new Date(`${today}T00:00:00Z`);
-        yesterday.setUTCDate(yesterday.getUTCDate() - 1);
-        const since = yesterday.toISOString().slice(0, 10);
-        // Pricing mutates the report rows. Keep the original ccusage costs for future catalogs.
-        history = {
-          older: structuredClone(days.filter((row) => row.period < since)),
-          since,
-          refreshAt: Date.now() + HISTORY_REFRESH_MS,
-        };
-        return days;
+        const scanned = await scan(kind, timezone, signal, undefined, previousDay(since));
+        if (signal.aborted) throw new Error("Usage scan cancelled");
+        const older = kind === "daily" ? scanned.filter((row) => row.period < since) : scanned;
+        base = { older, since, checkedAt: Date.now() };
+        saved.set(kind, base);
+        await store?.saveHistory(kind, base);
       } catch (error) {
-        if (!history || today < history.since || signal.aborted) throw error;
-        history.refreshAt = Date.now() + MAX_RETRY_MS;
-        console.error(`[ccusage-stats] Historical usage reread failed: ${(error as Error).message}`);
+        if (!usable || signal.aborted) throw error;
+        retryAt[kind] = Date.now() + MAX_RETRY_MS;
+        console.error(`[ccusage-stats] Could not reread older ${kind} usage: ${(error as Error).message}`);
+        if (usable.since !== since) recent = await scan(kind, timezone, signal, usable.since);
       }
     }
-    const { older, since } = history;
-    const recent = await scan("daily", timezone, signal, since);
-    return structuredClone(older).concat(recent.filter((row) => row.period >= since));
+    if (!base) throw new Error("Missing usage history");
+    const { older } = base;
+    if (kind === "daily") {
+      recent = recent.filter((row) => row.period >= base.since);
+      lastDays = { today, recent };
+      dailySignature = createHash("sha256").update(String(base.checkedAt)).update(JSON.stringify(recent)).digest("hex");
+      return structuredClone(older.concat(recent));
+    }
+    return joinSessions(older, recent);
   }
 
-  async function readSessions() {
+  async function readSessions(today: string, reprice = false) {
     const start = Date.now();
-    if (start >= nextSessionAt) {
+    const sameUsage = dailySignature !== undefined && dailySignature === sessionSignature;
+    const reuse = !sessionError && sameUsage && (reprice || start < verifySessionsAt);
+    if (!reuse && start >= nextSessionAt) {
       try {
-        // A bounded session query truncates resumed Codex conversations at the date filter.
-        sessions = await scan("session", timezone, signal);
+        sessions = await readWindow("session", today);
+        sessionRevision++;
         sessionError = null;
         sessionFailures = 0;
+        sessionSignature = dailySignature;
+        // A redistribution between sessions can leave daily usage unchanged.
+        verifySessionsAt = Date.now() + 60 * MINUTE;
       } catch (error) {
         if (signal.aborted) throw error;
         sessionError = (error as Error).message;
@@ -54,8 +86,20 @@ export function createUsageHistory(timezone: string, signal: AbortSignal, scan =
       const cooldown = Math.max(MINUTE * 2 ** Math.max(0, sessionFailures - 1), (end - start) * 3);
       nextSessionAt = end + Math.min(cooldown, MAX_RETRY_MS);
     }
-    return { rows: structuredClone(sessions), error: sessionError };
+    const rows = sessions;
+    return {
+      get rows() { return structuredClone(rows); },
+      error: sessionError,
+    };
   }
 
-  return { readDays, readSessions };
+  return {
+    async readDays(today: string, onRecent?: (rows: RawRow[]) => void, reprice = false) {
+      const base = saved.get("daily");
+      if (reprice && base && lastDays?.today === today) return structuredClone(base.older.concat(lastDays.recent));
+      return readWindow("daily", today, onRecent);
+    },
+    readSessions,
+    get revision() { return `${dailySignature}:${sessionRevision}:${sessionError}`; },
+  };
 }

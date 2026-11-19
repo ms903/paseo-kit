@@ -13,7 +13,7 @@ const BINARY_NAME = process.platform === "win32" ? "ccusage.exe" : "ccusage";
 const RUN_TIMEOUT_MS = 5 * 60_000;
 const MAX_OUTPUT_BYTES = 64 * 1024 * 1024;
 
-function paseoHome(): string {
+export function paseoHome(): string {
   return process.env.PASEO_HOME || path.join(os.homedir(), ".paseo");
 }
 
@@ -90,16 +90,16 @@ const rawAgentRow = z.object({
 const rawRow = rawAgentRow.extend({
   period: z.string(),
   agents: z.array(rawAgentRow).optional(),
-  metadata: z.object({ lastActivity: z.string().optional() }).loose().optional(),
+  metadata: z.object({ lastActivity: z.string().optional(), projectPath: z.string().nullish() }).optional(),
 });
 
-const reportRows = z.array(rawRow);
+export const reportRows = z.array(rawRow);
 
 export type RawModel = z.infer<typeof rawModel>;
 export type RawAgentRow = z.infer<typeof rawAgentRow>;
 export type RawRow = z.infer<typeof rawRow>;
 export type RawReport = Record<"daily" | "weekly" | "monthly" | "session", RawRow[]>;
-type ScanKind = "daily" | "session";
+export type ScanKind = "daily" | "session";
 
 export function describeCcusageFailure(
   { code, killed, signal }: Pick<ExecFileException, "code" | "killed" | "signal">,
@@ -118,7 +118,7 @@ export function describeCcusageFailure(
   return detail ? `${status}. ${detail}` : status;
 }
 
-export function runCcusage(kind: ScanKind, timezone: string, signal: AbortSignal, since?: string): Promise<RawRow[]> {
+export function runCcusage(kind: ScanKind, timezone: string, signal: AbortSignal, since?: string, until?: string): Promise<RawRow[]> {
   const binary = locateCcusage();
   const args = [
     kind,
@@ -130,6 +130,7 @@ export function runCcusage(kind: ScanKind, timezone: string, signal: AbortSignal
     "--no-color",
   ];
   if (since) args.push("--since", since);
+  if (until) args.push("--until", until);
   return new Promise((resolve, reject) => {
     const child = execFile(
       binary.file,

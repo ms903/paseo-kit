@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import {
   antigravityReport,
+  createAntigravityReport,
   readConversations,
   mergeAntigravity,
 } from "../plugins/ccusage-stats/server/antigravity";
@@ -14,6 +15,7 @@ import {
   generationCost,
 } from "../plugins/ccusage-stats/server/antigravity-prices";
 import { parsePriceCatalog } from "../plugins/ccusage-stats/server/price-catalog";
+import { createUsageStore } from "../plugins/ccusage-stats/server/usage-store";
 import { createSessionMatcher } from "../plugins/ccusage-stats/server/sessions";
 import { EMPTY_USAGE } from "../plugins/ccusage-stats/shared/usage";
 function vi(value: number): Buffer {
@@ -142,6 +144,33 @@ test("reads live WAL without changing source files and refreshes after an append
       (await antigravityReport("UTC", undefined, f.root)).daily[0].period,
       "2026-11-15",
     );
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("a restored Antigravity index opens only databases whose contents or WAL changed", async () => {
+  const f = await fixture();
+  const zone = "Asia/Hong_Kong";
+  const cache = path.join(f.root, "cache");
+  const reads: string[][] = [];
+  const openReport = () => createAntigravityReport(createUsageStore(zone, cache), (...args) => {
+    reads.push(args[0]);
+    return readConversations(...args);
+  });
+  try {
+    f.insert(1, generation());
+    const first = await openReport()(zone, undefined, f.root);
+    assert.deepEqual(reads, [[f.file]]);
+    const restarted = openReport();
+    const warm = await restarted(zone, undefined, f.root);
+    assert.deepEqual(warm, first);
+    assert.equal(await restarted(zone, undefined, f.root), warm);
+    assert.equal(reads.length, 1);
+    f.insert(2, generation());
+    const updated = await restarted(zone, undefined, f.root);
+    assert.equal(updated.session[0].totalTokens, 720);
+    assert.deepEqual(reads, [[f.file], [f.file]]);
   } finally {
     await f.cleanup();
   }

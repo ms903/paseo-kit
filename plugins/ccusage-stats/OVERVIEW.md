@@ -14,7 +14,11 @@ Paseo stores each agent's provider session id. For Claude Code this is the sessi
 
 ## Freshness
 
-All views share the daemon's usage cache. On the first read it loads daily history. Subsequent reads rescan from the day before that pass and rebuild week and month totals from the daily rows. While the monitor is in use, it rereads the older days after six hours to pick up historical edits. Session totals use a separate full scan so a resumed conversation keeps its earlier turns. The two ccusage scans run one at a time with a five-minute limit each. Slow scans and failures increase the interval between attempts. A failed session scan keeps the last session totals and the calendar can still update.
+The daemon saves its report under `$PASEO_HOME/cache/ccusage-stats/` (normally `~/.paseo/cache/ccusage-stats/`). After a restart or plugin update, the sidebar and details open from that report while one background job checks recent activity. On the first installation, today's token count appears as soon as the recent daily scan and Antigravity counts are available.
+
+Daily and session totals from before the recent window are saved separately. The window starts on the day before the last historical scan. A resumed session combines its older and recent usage. While a view is active, the daemon checks recent days and reads recent sessions when daily usage changes. It also checks recent sessions once an hour for changes between sessions and reconciles older records after seven days. Slow or failed scans back off.
+
+Antigravity database and WAL signatures and Codex rollout signatures identify changes to model-pricing inputs. Only aggregate counts and pricing bands are cached. The compressed usage files have a combined limit of 13 MiB per daemon. A price update reuses available totals.
 
 ## Setup and limits
 

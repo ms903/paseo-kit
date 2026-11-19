@@ -1,5 +1,4 @@
-import { antigravityReport, mergeAntigravity } from "./antigravity";
-import type { RpcOutput } from "@getpaseo/plugin";
+import { createAntigravityReport, mergeAntigravity } from "./antigravity";
 import {
   EMPTY_USAGE,
   type AgentUsage,
@@ -7,7 +6,9 @@ import {
   type SessionUsage,
   type Usage,
   type UsagePeriod,
-  type usageReportRpc,
+  type UsageReport,
+  type ReportResponse,
+  type TodayPreview,
 } from "../shared/usage";
 import {
   runCcusage,
@@ -17,11 +18,10 @@ import {
   type RawRow,
 } from "./ccusage";
 import { createReportPricer } from "./codex-prices";
-import { createPriceCatalog } from "./price-catalog";
+import { createPriceCatalog, type PriceCatalog } from "./price-catalog";
 import { createUsageHistory } from "./usage-history";
 import { rollupDays } from "./usage-rows";
-
-export type UsageReport = RpcOutput<typeof usageReportRpc>;
+import { createUsageStore } from "./usage-store";
 
 // Minimum interval between automatic report scans.
 const FRESH_MS = 60_000;
@@ -166,117 +166,167 @@ interface Snapshot {
 }
 
 export interface ReportCache {
-  read(): Promise<UsageReport>;
-  updatePrices(): Promise<UsageReport>;
-  /** Every session ccusage knows, for matching Paseo agents. */
+  read(retry?: boolean): Promise<ReportResponse>;
+  updatePrices(): Promise<ReportResponse>;
   sessions(): Promise<SessionUsage[]>;
-  /** Refreshes a due report after a turn if anyone is watching. */
   invalidate(): void;
   stop(): void;
 }
 
-export function createReportCache(scan = runCcusage): ReportCache {
+export function createReportCache(scan = runCcusage, cacheDirectory?: string): ReportCache {
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
   const lifetime = new AbortController();
-  const priceCatalog = createPriceCatalog(lifetime.signal);
-  const applyPrices = createReportPricer();
-  const history = createUsageHistory(timezone, lifetime.signal, scan);
-  let snapshot: Snapshot | null = null;
+  const { signal } = lifetime;
+  const store = createUsageStore(timezone, cacheDirectory, signal);
+  const priceCatalog = createPriceCatalog(signal);
+  const applyPrices = createReportPricer(undefined, store);
+  const readAntigravity = createAntigravityReport(store);
+  const history = createUsageHistory(timezone, signal, scan, store);
+  let snapshot: Snapshot | undefined;
+  let preview: TodayPreview | undefined;
+  let rendered: { history: string; antigravity: RawReport; catalog: PriceCatalog } | undefined;
+  let startup: Promise<void> | undefined;
+  let restored = false;
+  let running = false;
   let nextRefreshAt = 0;
   let failures = 0;
   let refreshError: string | null = null;
-  let inflight: Promise<Snapshot> | null = null;
   let lastReadAt = 0;
   let debounce: ReturnType<typeof setTimeout> | null = null;
-  let priceUpdate: Promise<UsageReport> | null = null;
+  let priceUpdate: Promise<ReportResponse> | null = null;
+  let pricesChanged = false;
 
-  const refresh = (): Promise<Snapshot> => {
-    inflight ??= (async () => {
-      const start = Date.now();
-      try {
-        const prices = priceCatalog.read();
-        const scans = [
-          history.readDays(localToday(timezone)),
-          antigravityReport(timezone, lifetime.signal, undefined, prices),
-          prices,
-        ] as const;
-        const [daily, antigravity, catalog] = await Promise.all(scans).finally(
-          () => Promise.allSettled(scans),
-        );
-        const generatedAt = Date.now();
-        const today = localToday(timezone);
-        const session = await history.readSessions();
+  async function refresh(reprice: boolean) {
+    const start = Date.now();
+    const today = localToday(timezone);
+    try {
+      const prices = priceCatalog.read();
+      let nativeToday: number | undefined;
+      let agyToday: number | undefined;
+      function publishToday() {
+        if (!snapshot && nativeToday !== undefined && agyToday !== undefined && !signal.aborted) {
+          preview = { status: "today", today, totalTokens: nativeToday + agyToday, refreshError: null };
+        }
+      }
+      const scans = [
+        history.readDays(today, (recent) => {
+          const row = recent.find((day) => day.period === today);
+          nativeToday = (row?.agents ?? (row ? [row] : []))
+            .reduce((total, agent) => total + (/antigravity/i.test(agent.agent) ? 0 : agent.totalTokens), 0);
+          publishToday();
+        }, reprice),
+        readAntigravity(timezone, signal, undefined, prices).then((data) => {
+          agyToday = data.daily.find((day) => day.period === today)?.totalTokens ?? 0;
+          publishToday();
+          return data;
+        }),
+        prices,
+      ] as const;
+      let [daily, antigravity, catalog] = await Promise.all(scans).finally(() => Promise.allSettled(scans));
+      const session = await history.readSessions(today, reprice);
+      if (pricesChanged) {
+        pricesChanged = false;
+        catalog = await priceCatalog.read();
+        antigravity = await readAntigravity(timezone, signal, undefined, catalog);
+      }
+      const unchanged = rendered?.history === history.revision && rendered.antigravity === antigravity
+        && rendered.catalog === catalog && snapshot?.report.today === today;
+      if (unchanged && snapshot) {
+        snapshot.report = { ...snapshot.report, generatedAt: Date.now() };
+      } else {
         const base: RawReport = { daily, weekly: [], monthly: [], session: session.rows };
-        await applyPrices(base, timezone, catalog, lifetime.signal);
+        await applyPrices(base, timezone, catalog, signal);
+        if (signal.aborted) throw new Error("Usage scan cancelled");
         base.weekly = rollupDays(base.daily, "weekly");
         base.monthly = rollupDays(base.daily, "monthly");
         const raw = mergeAntigravity(base, antigravity);
         const sessions = raw.session.map(sessionOf);
-        const next = {
-          report: { ...buildReport(raw, timezone, today, generatedAt, sessions), sessionRefreshError: session.error },
-          sessions,
-        };
-        snapshot = next;
-        nextRefreshAt = Date.now() + Math.min(15 * FRESH_MS, Math.max(FRESH_MS, (generatedAt - start) * 2));
-        failures = 0;
-        refreshError = null;
-        return next;
-      } catch (error) {
+        if (session.error && !base.session.length && snapshot) {
+          sessions.push(...snapshot.sessions.filter((row) => row.agent !== "antigravity"));
+        }
+        const report = buildReport(raw, timezone, today, Date.now(), sessions);
+        report.sessionRefreshError = session.error;
+        snapshot = { report, sessions };
+        rendered = { history: history.revision, antigravity, catalog };
+        await store.saveReport(report);
+      }
+      preview = undefined;
+      failures = 0;
+      refreshError = null;
+      nextRefreshAt = today === localToday(timezone)
+        ? Date.now() + Math.min(15 * FRESH_MS, Math.max(FRESH_MS, (Date.now() - start) * 2)) : 0;
+    } catch (error) {
+      if (!signal.aborted) {
         failures = Math.min(failures + 1, 5);
         const delay = Math.max(FRESH_MS * 2 ** (failures - 1), (Date.now() - start) * 2);
         nextRefreshAt = Date.now() + Math.min(15 * FRESH_MS, delay);
         refreshError = (error as Error).message;
-        if (!lifetime.signal.aborted) console.error(`[ccusage-stats] ${refreshError}`);
-        throw error;
-      } finally {
-        inflight = null;
+        console.error(`[ccusage-stats] ${refreshError}`);
       }
-    })();
-    return inflight;
-  };
+    } finally {
+      running = false;
+      if (pricesChanged) {
+        nextRefreshAt = 0;
+        schedule();
+      }
+    }
+  }
 
-  const current = async (): Promise<Snapshot> => {
+  function schedule() {
+    if (!restored || running || signal.aborted || Date.now() < nextRefreshAt) return;
+    running = true;
+    const reprice = pricesChanged;
+    pricesChanged = false;
+    void refresh(reprice);
+  }
+
+  async function current() {
     lastReadAt = Date.now();
-    if (!snapshot) {
-      if (!inflight && refreshError && Date.now() < nextRefreshAt) throw new Error(refreshError);
-      return refresh();
-    }
-    if (Date.now() >= nextRefreshAt) {
-      refresh().catch(() => {
-        // Logged in refresh; the stale snapshot below carries the error.
+    // Give a local cache hit one short read on the first request. Log scans never hold the RPC.
+    startup ??= new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, 100);
+      void store.readReport().then((report) => {
+        if (report && !signal.aborted) snapshot = { report, sessions: report.recentSessions };
+      }).finally(() => {
+        clearTimeout(timer);
+        restored = true;
+        schedule();
+        resolve();
       });
-    }
-    return snapshot;
-  };
+    });
+    await startup;
+    schedule();
+  }
+
+  async function read(retry = false): Promise<ReportResponse> {
+    if (retry && refreshError) nextRefreshAt = 0;
+    await current();
+    if (snapshot) return { ...snapshot.report, refreshError, refreshing: running };
+    if (preview) return { ...preview, refreshError };
+    if (refreshError && !running) throw new Error(refreshError);
+    return { status: "loading" };
+  }
 
   return {
-    async read() {
-      const { report } = await current();
-      return { ...report, refreshError };
-    },
+    read,
     updatePrices() {
       priceUpdate ??= (async () => {
         await priceCatalog.update();
-        // Let a report started with the previous prices finish before replacing it.
-        await inflight?.catch(() => undefined);
-        const { report } = await refresh().catch((error) => {
-          if (!snapshot) throw error;
-          return snapshot;
-        });
-        return { ...report, refreshError };
-      })().finally(() => {
-        priceUpdate = null;
-      });
+        pricesChanged = true;
+        nextRefreshAt = 0;
+        return read();
+      })().finally(() => { priceUpdate = null; });
       return priceUpdate;
     },
     async sessions() {
-      return (await current()).sessions;
+      await current();
+      return snapshot?.sessions ?? [];
     },
     invalidate() {
       if (debounce) clearTimeout(debounce);
       debounce = setTimeout(() => {
         debounce = null;
-        if (Date.now() - lastReadAt < ACTIVE_READER_MS && Date.now() >= nextRefreshAt) refresh().catch(() => {});
+        if (Date.now() - lastReadAt < ACTIVE_READER_MS) schedule();
       }, INVALIDATE_DEBOUNCE_MS);
     },
     stop() {

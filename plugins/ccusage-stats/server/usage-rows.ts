@@ -44,6 +44,26 @@ export function addTotals(to: RawAgentRow, from: RawAgentRow): void {
   to.totalCost += from.totalCost;
 }
 
+/** Reunite the two date windows of a resumed session using its native identity. */
+export function joinSessions(older: RawRow[], recent: RawRow[]): RawRow[] {
+  const key = (row: RawRow) => JSON.stringify([row.agent, row.period, row.metadata?.projectPath]);
+  const sessions = new Map(older.map((row) => [key(row), row]));
+  for (const row of recent) {
+    const id = key(row);
+    const previous = sessions.get(id);
+    // ccusage filters Qwen by last activity and returns the lifetime total in that window.
+    if (!previous || row.agent === "qwen") {
+      sessions.set(id, row);
+      continue;
+    }
+    const joined = { ...row, modelBreakdowns: previous.modelBreakdowns.map((model) => ({ ...model })) };
+    addTotals(joined, previous);
+    for (const model of row.modelBreakdowns) addModel(joined.modelBreakdowns, model);
+    sessions.set(id, joined);
+  }
+  return [...sessions.values()];
+}
+
 export function weekOf(day: string): string {
   const date = new Date(`${day}T00:00:00Z`);
   date.setUTCDate(date.getUTCDate() - ((date.getUTCDay() + 6) % 7));

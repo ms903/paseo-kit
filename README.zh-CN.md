@@ -208,6 +208,7 @@ Paseo 插件是**受信任、无沙箱**的代码。服务端代码作为 daemon
 ## 此 fork 的改进
 
 - ccusage-stats 支持 Antigravity App、IDE 和 CLI 的本地会话数据库，统计输入、输出、缓存 token，并按 Google 和 Anthropic 官方公开单价计算费用。
+- 用量报表和历史汇总保存在各自 host 的 `$PASEO_HOME/cache/ccusage-stats/`，总上限为 13 MiB。升级和重启后先显示已保存的报表，后台补算近期用量。
 - 媒体上传采用独立任务 ID、完整内容指纹、排他文件发布和续传状态日志。
 - 媒体扫描限制条目数、深度、时间和并发；自动回合扫描、输入框扫描默认关闭，SSH 主机由设置明确指定。
 - 远程文件操作需要 Python 3；媒体播放仍由远程 ffmpeg 执行。

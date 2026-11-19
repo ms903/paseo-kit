@@ -15,7 +15,7 @@ v8.setFlagsFromString("--no-maglev");
 export default function contribute(server: PluginServerContext) {
   const cache = createReportCache();
   const matcher = createSessionMatcher(cache);
-  server.handle(usageReportRpc, () => cache.read());
+  server.handle(usageReportRpc, ({ retry }) => cache.read(retry));
   server.handle(updatePricesRpc, () => cache.updatePrices());
   server.handle(sessionUsageRpc, (input, { paseo }) => matcher.resolve(input, paseo));
   // A finished turn has written new usage to the agent's logs.

@@ -16,7 +16,7 @@ import {
   reportTimeFormatter, shortSessionId,
 } from "./format";
 import {
-  AgentList, Composition, FONT, TokenChange, UsageAmounts, UsageTableHeader, usageColumns,
+  AgentList, Composition, FONT, TodayUsage, TokenChange, UsageAmounts, UsageTableHeader, usageColumns,
 } from "./summary";
 
 type HoverState = PressableStateCallbackType & { hovered?: boolean };
@@ -315,7 +315,7 @@ function Body({
 }
 
 export function UsageScreen({ theme, host, layout, params }: PluginScreenProps) {
-  const { data, error, isPending, refetch, isRefetching } = useUsageReport(host.id);
+  const { data, error, isPending, preview, retryReport, isRefetching } = useUsageReport(host.id);
   const updatePrices = useRpc(updatePricesRpc);
   const queryClient = useQueryClient();
   const toast = useToast();
@@ -366,6 +366,11 @@ export function UsageScreen({ theme, host, layout, params }: PluginScreenProps) 
             initialKind={initialKind}
             initialPeriod={params.period}
           />
+        ) : preview ? (
+          <>
+            {priceAction}
+            <Panel theme={theme}><TodayUsage theme={theme} preview={preview} /></Panel>
+          </>
         ) : (
           <>
             {priceAction}
@@ -383,25 +388,25 @@ export function UsageScreen({ theme, host, layout, params }: PluginScreenProps) 
                   {error.message}
                 </Text>
               ) : null}
-              {!isPending ? (
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel="Try again"
-                  disabled={isRefetching}
-                  onPress={() => void refetch()}
-                  style={({ hovered }: HoverState) => ({
-                    paddingVertical: 6, paddingHorizontal: 12, borderRadius: 8,
-                    backgroundColor: hovered ? theme.colors.surface1 : theme.colors.surface2,
-                  })}
-                >
-                  <Text style={{ fontSize: FONT.body, color: theme.colors.foreground }}>
-                    {isRefetching ? "Trying…" : "Try again"}
-                  </Text>
-                </Pressable>
-              ) : null}
             </View>
           </>
         )}
+        {!data && (error || preview?.refreshError) ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Try again"
+            disabled={isRefetching}
+            onPress={() => void retryReport().catch(() => undefined)}
+            style={({ hovered }: HoverState) => ({
+              alignSelf: "center", paddingVertical: 6, paddingHorizontal: 12, borderRadius: 8,
+              backgroundColor: hovered ? theme.colors.surface1 : theme.colors.surface2,
+            })}
+          >
+            <Text style={{ fontSize: FONT.body, color: theme.colors.foreground }}>
+              {isRefetching ? "Trying…" : "Try again"}
+            </Text>
+          </Pressable>
+        ) : null}
       </View>
     </ScrollView>
   );

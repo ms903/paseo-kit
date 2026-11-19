@@ -34,7 +34,7 @@ const sessionSchema = z.object({
   lastActivity: z.string().nullable(),
 });
 
-const usageReportSchema = z.object({
+export const usageReportSchema = z.object({
   /** When ccusage last produced this report, in epoch milliseconds. */
   generatedAt: z.number(),
   /** The daemon's local date, the same calendar ccusage groups by. */
@@ -50,18 +50,30 @@ const usageReportSchema = z.object({
   sessionRefreshError: z.string().nullable().optional(),
   /** Set when the latest refresh failed and an older report is served instead. */
   refreshError: z.string().nullable(),
+  refreshing: z.boolean().optional(),
 });
+
+const previewSchema = z.object({
+  status: z.literal("today"),
+  today: z.string(),
+  totalTokens: z.number(),
+  refreshError: z.string().nullable(),
+});
+const reportResponseSchema = z.union([usageReportSchema, previewSchema, z.object({ status: z.literal("loading") })]);
+export type UsageReport = z.infer<typeof usageReportSchema>;
+export type TodayPreview = z.infer<typeof previewSchema>;
+export type ReportResponse = z.infer<typeof reportResponseSchema>;
 
 export const usageReportRpc = defineRpc({
   name: "usage.report",
-  input: z.object({}),
-  output: usageReportSchema,
+  input: z.object({ retry: z.boolean().optional() }),
+  output: reportResponseSchema,
 });
 
 export const updatePricesRpc = defineRpc({
   name: "usage.prices.update",
   input: z.object({}),
-  output: usageReportSchema,
+  output: reportResponseSchema,
 });
 
 const sessionMatchSchema = z.discriminatedUnion("status", [

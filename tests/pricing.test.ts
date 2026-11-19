@@ -7,6 +7,7 @@ import type {
   RawReport,
   RawRow,
 } from "../plugins/ccusage-stats/server/ccusage";
+import { createUsageStore } from "../plugins/ccusage-stats/server/usage-store";
 import { createReportPricer } from "../plugins/ccusage-stats/server/codex-prices";
 import {
   createPriceCatalog,
@@ -182,7 +183,8 @@ test("prices GPT-6.2 per request, including cached tokens, long context and reco
         .map((event) => JSON.stringify(event))
         .join("\n") + "\n",
     );
-    const applyPrices = createReportPricer([root]);
+    const cache = path.join(root, "price-buckets");
+    const applyPrices = createReportPricer([root], createUsageStore("UTC", cache));
     const signal = new AbortController().signal;
     const report = sampleReport(session);
     await applyPrices(report, "UTC", EMPTY_CATALOG, signal);
@@ -201,7 +203,9 @@ test("prices GPT-6.2 per request, including cached tokens, long context and reco
       assert.ok(Math.abs(row.totalCost - 8.793) < 1e-10);
     }
     const refreshed = sampleReport(session);
-    await applyPrices(
+    let reads = 0;
+    const restarted = createReportPricer([root], createUsageStore("UTC", cache), async () => { reads++; return []; });
+    await restarted(
       refreshed,
       "UTC",
       parsePriceCatalog({ ...pricingPayload(3), openai: { models: {
@@ -214,6 +218,10 @@ test("prices GPT-6.2 per request, including cached tokens, long context and reco
       Math.abs(refreshed.session[0].modelBreakdowns[0].cost - 2.373) < 1e-10,
     );
     assert.ok(Math.abs(refreshed.session[0].modelBreakdowns[2].cost - 0.0008) < 1e-10);
+    assert.equal(reads, 0);
+    await writeFile(file, "\n", { flag: "a" });
+    await restarted(sampleReport(session), "UTC", EMPTY_CATALOG, signal);
+    assert.equal(reads, 1);
     assert.equal(
       refreshed.session[0].totalTokens,
       report.session[0].totalTokens,

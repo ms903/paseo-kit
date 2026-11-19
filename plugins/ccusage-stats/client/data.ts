@@ -1,6 +1,6 @@
-import type { PluginTheme, RpcOutput } from "@getpaseo/plugin";
+import type { PluginTheme } from "@getpaseo/plugin";
 import { useRpc } from "@getpaseo/plugin/client";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   EMPTY_USAGE,
   sessionUsageRpc,
@@ -10,23 +10,33 @@ import {
   type UsagePeriod,
 } from "../shared/usage";
 
-// The daemon caches ccusage's report and refreshes it after each finished turn; polling only
-// picks that up. ccusage reads whole log files, so there is no point polling faster.
 const REPORT_REFRESH_MS = 30_000;
 const SESSION_REFRESH_MS = 20_000;
 export const USAGE_REPORT_KEY = ["usage-report"] as const;
 export const SESSION_USAGE_KEY = ["session-usage"] as const;
 
-export type UsageReport = RpcOutput<typeof usageReportRpc>;
+export type { UsageReport } from "../shared/usage";
 
 export function useUsageReport(hostId: string) {
   const getReport = useRpc(usageReportRpc);
-  return useQuery({
-    queryKey: [...USAGE_REPORT_KEY, hostId],
+  const client = useQueryClient();
+  const queryKey = [...USAGE_REPORT_KEY, hostId];
+  const query = useQuery({
+    queryKey,
     queryFn: () => getReport({}),
-    refetchInterval: REPORT_REFRESH_MS,
+    retry: false,
+    refetchInterval: ({ state: { data } }) => {
+      if (!data) return REPORT_REFRESH_MS;
+      if ("status" in data) return data.status === "today" && data.refreshError ? REPORT_REFRESH_MS : 2_000;
+      return data.refreshing ? 10_000 : REPORT_REFRESH_MS;
+    },
     staleTime: REPORT_REFRESH_MS / 2,
   });
+  const response = query.data;
+  const data = response && !("status" in response) ? response : undefined;
+  const preview = response && "status" in response && response.status === "today" ? response : undefined;
+  const retryReport = () => client.fetchQuery({ queryKey, queryFn: () => getReport({ retry: true }), retry: false, staleTime: 0 });
+  return { ...query, data, preview, retryReport, isPending: !data && !query.error && !preview?.refreshError };
 }
 
 export function useSessionUsage(hostId: string, agentId: string) {

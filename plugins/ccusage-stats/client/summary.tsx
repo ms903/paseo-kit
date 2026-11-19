@@ -2,7 +2,7 @@ import type { PluginTheme } from "@getpaseo/plugin";
 import { Icon } from "@getpaseo/plugin/client/react-native";
 import { useState } from "react";
 import { Pressable, Text, View, type PressableStateCallbackType, type TextStyle } from "react-native";
-import type { AgentUsage, PeriodKind, Usage, UsagePeriod } from "../shared/usage";
+import type { AgentUsage, PeriodKind, TodayPreview, Usage, UsagePeriod } from "../shared/usage";
 import { ShareBar, SwatchDot, type ShareSegment } from "./charts";
 import { agentSwatch, foldAgents } from "./data";
 import {
@@ -17,6 +17,22 @@ import {
 type HoverState = PressableStateCallbackType & { hovered?: boolean };
 
 export const FONT = { caption: 11, body: 12, title: 13 } as const;
+
+export function TodayUsage({ theme, preview }: { theme: PluginTheme; preview: TodayPreview }) {
+  return (
+    <View style={{ gap: 6 }}>
+      <Text style={{ fontSize: FONT.title, color: theme.colors.foreground }}>
+        {formatPeriodLong("daily", preview.today)}
+      </Text>
+      <Text style={{ fontSize: 22, fontWeight: "600", color: theme.colors.foreground }}>
+        {formatTokens(preview.totalTokens)} tokens
+      </Text>
+      <Text style={{ fontSize: FONT.body, color: preview.refreshError ? theme.colors.statusWarning : theme.colors.foregroundMuted }}>
+        {preview.refreshError ?? "Loading usage history…"}
+      </Text>
+    </View>
+  );
+}
 
 const amountStyle: TextStyle = {
   fontSize: FONT.body,

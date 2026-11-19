@@ -37,6 +37,7 @@ complete, self-contained Paseo plugin project.
   cost per million tokens, cache hit rate, per-agent and per-model breakdown, recent sessions.
 - A composer pill shows the token total of the current provider session, including Antigravity conversations started in Paseo.
 - Antigravity app, IDE and CLI usage is read from local conversation databases, including live WAL updates. Costs use Google and Anthropic public prices for input, output and cache tokens.
+- Each host keeps up to 13 MiB of compressed usage statistics under `$PASEO_HOME/cache/ccusage-stats/`. After an update or restart the saved report opens while recent usage refreshes in the background.
 - Counts every agent ccusage supports (Claude Code, Codex, Gemini CLI, OpenCode, Amp, ...).
   Use **Update prices** in Token usage to refresh the public model prices from Models.dev.
 

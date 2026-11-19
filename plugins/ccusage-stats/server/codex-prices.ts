@@ -5,6 +5,8 @@ import { createInterface } from "node:readline";
 import { Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import * as zlib from "node:zlib";
+import { z } from "zod";
+import type { UsageStore } from "./usage-store";
 import type { RawReport } from "./ccusage";
 import {
   findModelPrice,
@@ -78,13 +80,14 @@ function gpt62Price(
   return live?.context.length ? live : builtin;
 }
 
-interface Bucket {
-  model: string;
-  day: string;
-  contextSize: number;
-  multiplier: number;
-  tokens: TokenCounts;
-}
+const bucketSchema = z.object({
+  model: z.string(), day: z.iso.date(), contextSize: z.number(), multiplier: z.number(),
+  tokens: z.object({
+    inputTokens: z.number(), outputTokens: z.number(),
+    cacheReadTokens: z.number(), cacheCreationTokens: z.number(),
+  }),
+});
+type Bucket = z.infer<typeof bucketSchema>;
 
 interface PricedUsage extends TokenCounts {
   cost: number;
@@ -401,7 +404,8 @@ function periodKeys(
 }
 
 /** Reuses ccusage's report rows. Request-level prices replace a row only when the token counts agree. */
-export function createReportPricer(homes = defaultHomes()) {
+export function createReportPricer(homes = defaultHomes(), store?: UsageStore, readFile = readRollout) {
+  const index = store?.fileIndex("codex", z.array(bucketSchema));
   const cached = new Map<string, { signature: string; buckets: Bucket[] }>();
 
   return async function applyPrices(
@@ -444,15 +448,16 @@ export function createReportPricer(homes = defaultHomes()) {
         const source = await rolloutSource(session.period, homes);
         if (!source || source.stat.size > MAX_FILE_BYTES || budget.aborted)
           continue;
-        const signature = `${source.stat.size}:${source.stat.mtimeMs}:${timezone}:${bounds.join(",")}`;
+        const { size, mtimeMs, ctimeMs, ino } = source.stat;
+        const signature = `${size}:${mtimeMs}:${ctimeMs}:${ino}:${timezone}:${bounds.join(",")}`;
         const cachedFile = cached.get(source.file);
-        const buckets =
-          cachedFile?.signature === signature
-            ? cachedFile.buckets
-            : await readRollout(source.file, timezone, bounds, budget).catch(
-                () => null,
-              );
-        if (!buckets) continue;
+        let buckets = cachedFile?.signature === signature ? cachedFile.buckets : await index?.get(source.file, signature);
+        if (!buckets) {
+          if (budget.aborted) continue;
+          buckets = await readFile(source.file, timezone, bounds, budget).catch(() => undefined);
+          if (!buckets) continue;
+          await index?.set(source.file, signature, buckets);
+        }
         cached.delete(source.file);
         cached.set(source.file, { signature, buckets });
         if (cached.size > MAX_CACHED_FILES)
@@ -477,6 +482,7 @@ export function createReportPricer(homes = defaultHomes()) {
     }
 
     if (sessions.length) await Promise.all([readSessions(), readSessions()]);
+    if (!signal.aborted) await index?.flush();
     for (const kind of PERIODS) {
       for (const row of report[kind]) {
         for (const agent of row.agents ?? [row]) {

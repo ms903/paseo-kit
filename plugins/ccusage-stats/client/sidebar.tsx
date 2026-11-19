@@ -18,8 +18,8 @@ import {
   type TypicalDay,
   type UsageReport,
 } from "./data";
-import { formatAgo, formatCost, formatPercent, formatTokens } from "./format";
-import { AgentList, FONT, Headline } from "./summary";
+import { formatAgo, formatCost, formatPercent, formatPeriodLong, formatTokens } from "./format";
+import { AgentList, FONT, Headline, TodayUsage } from "./summary";
 
 // Geometry follows the built-in usage summary and host-monitor in the same footer.
 const ICON_SIZE = 14;
@@ -51,7 +51,7 @@ function todayOf(report: UsageReport) {
 }
 
 export function UsageSidebarItem({ theme, host, openPopover }: PluginSidebarItemProps) {
-  const { data, error } = useUsageReport(host.id);
+  const { data, error, preview } = useUsageReport(host.id);
   const [available, setAvailable] = useState<number | null>(null);
   const onLayout = useCallback(
     (event: LayoutChangeEvent) => setAvailable(event.nativeEvent.layout.width),
@@ -59,10 +59,10 @@ export function UsageSidebarItem({ theme, host, openPopover }: PluginSidebarItem
   );
 
   // Like the built-in usage summary: nothing until there is something to show.
-  if (!data && !error) return null;
+  if (!data && !preview && !error) return null;
   const today = data ? todayOf(data) : undefined;
   const typical = data ? typicalDay(data.daily) : null;
-  const tokens = formatTokens(today?.usage.totalTokens ?? 0);
+  const tokens = formatTokens(today?.usage.totalTokens ?? preview?.totalTokens ?? 0);
   const cost = formatCost(today?.usage.cost ?? 0);
   const labelWidth = ICON_SIZE + ICON_GAP + tokens.length * DIGIT_WIDTH;
   const costWidth = labelWidth + TEXT_GAP + cost.length * DIGIT_WIDTH;
@@ -73,8 +73,8 @@ export function UsageSidebarItem({ theme, host, openPopover }: PluginSidebarItem
       ? `, ${formatPercent(today.usage.cost / typical.cost)} of a typical day`
       : "";
   const label = today
-    ? `Token usage today: ${tokens} tokens${pace}, ${cost}`
-    : "Token usage unavailable";
+    ? `${formatPeriodLong("daily", today.period)}, ${tokens} tokens${pace}, ${cost}`
+    : preview ? `${formatPeriodLong("daily", preview.today)}, ${tokens} tokens` : "Token usage unavailable";
 
   return (
     <Pressable
@@ -139,7 +139,7 @@ export function UsageSidebarItem({ theme, host, openPopover }: PluginSidebarItem
               color: theme.colors.foregroundMuted,
             }}
           >
-            Usage unavailable
+            {preview ? tokens : "Usage unavailable"}
           </Text>
         )}
       </View>
@@ -148,7 +148,7 @@ export function UsageSidebarItem({ theme, host, openPopover }: PluginSidebarItem
 }
 
 export function UsagePopover({ theme, host, layout, openScreen }: PluginPopoverProps) {
-  const { data, error, isPending } = useUsageReport(host.id);
+  const { data, error, isPending, preview } = useUsageReport(host.id);
   const [kind, setKind] = useState<PeriodKind>("daily");
   const [pickedKey, setPickedKey] = useState<string | null>(null);
   const rootStyle = {
@@ -158,6 +158,7 @@ export function UsagePopover({ theme, host, layout, openScreen }: PluginPopoverP
     backgroundColor: theme.colors.surface1,
   };
 
+  if (preview) return <View style={rootStyle}><TodayUsage theme={theme} preview={preview} /></View>;
   if (!data) {
     return (
       <View style={rootStyle}>
