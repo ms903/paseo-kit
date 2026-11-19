@@ -153,8 +153,13 @@ function RecentSessions({
   const columns = narrow ? undefined : usageColumns(recentSessions.map((session) => session.usage));
   return (
     <Panel theme={theme} title="Recent sessions">
+      {report.sessionRefreshError ? (
+        <Text style={{ fontSize: FONT.body, color: theme.colors.statusWarning }}>
+          Could not refresh sessions. {report.sessionRefreshError}
+        </Text>
+      ) : null}
       {recentSessions.length === 0 ? (
-        <Text style={{ fontSize: FONT.body, color: theme.colors.foregroundMuted }}>No sessions yet.</Text>
+        report.sessionRefreshError ? null : <Text style={{ fontSize: FONT.body, color: theme.colors.foregroundMuted }}>No sessions yet.</Text>
       ) : (
         <View>
           <UsageTableHeader theme={theme} label="Session" columns={columns} />

@@ -14,7 +14,7 @@ Paseo stores each agent's provider session id. For Claude Code this is the sessi
 
 ## Freshness
 
-The daemon runs ccusage once for all views and caches the result for a minute. When an agent finishes a turn, the cache is refreshed a few seconds later if someone has looked at the numbers in the last 15 minutes. While a refresh runs, the previous numbers are shown. If a refresh fails, older numbers stay visible with a warning.
+All views share the daemon's usage cache. On the first read it loads daily history. Subsequent reads rescan from the day before that pass and rebuild week and month totals from the daily rows. While the monitor is in use, it rereads the older days after six hours to pick up historical edits. Session totals use a separate full scan so a resumed conversation keeps its earlier turns. The two ccusage scans run one at a time with a five-minute limit each. Slow scans and failures increase the interval between attempts. A failed session scan keeps the last session totals and the calendar can still update.
 
 ## Setup and limits
 

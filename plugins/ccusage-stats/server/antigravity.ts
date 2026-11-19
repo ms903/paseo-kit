@@ -2,7 +2,8 @@ import { execFile } from "node:child_process";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { RawAgentRow, RawModel, RawReport, RawRow } from "./ccusage";
+import type { RawReport, RawRow } from "./ccusage";
+import { addModelUsage, addTotals, emptyRow, weekOf } from "./usage-rows";
 import { ANTIGRAVITY_READER } from "./antigravity-reader";
 import {
   BUILTIN_CONTEXT_BOUNDS,
@@ -122,45 +123,6 @@ export function readConversations(
   });
 }
 
-function empty(period: string): RawRow {
-  return {
-    period,
-    agent: "antigravity",
-    totalTokens: 0,
-    totalCost: 0,
-    inputTokens: 0,
-    outputTokens: 0,
-    cacheCreationTokens: 0,
-    cacheReadTokens: 0,
-    modelBreakdowns: [],
-  };
-}
-function append(row: RawAgentRow, model: RawModel): void {
-  for (const key of [
-    "inputTokens",
-    "outputTokens",
-    "cacheCreationTokens",
-    "cacheReadTokens",
-  ] as const)
-    row[key] += model[key];
-  row.totalTokens +=
-    model.inputTokens + model.outputTokens + model.cacheReadTokens;
-  row.totalCost += model.cost;
-  const existing = row.modelBreakdowns.find(
-    (entry) => entry.modelName === model.modelName,
-  );
-  if (!existing) row.modelBreakdowns.push({ ...model });
-  else
-    for (const key of [
-      "inputTokens",
-      "outputTokens",
-      "cacheCreationTokens",
-      "cacheReadTokens",
-      "cost",
-    ] as const)
-      existing[key] += model[key];
-}
-
 export async function antigravityReport(
   timezone: string,
   signal?: AbortSignal,
@@ -209,7 +171,7 @@ export async function antigravityReport(
   for (const [id, entry] of files) {
     const conversation = cached.get(entry.file)?.conversation;
     if (!conversation?.buckets.length) continue;
-    const total = empty(id);
+    const total = emptyRow(id, "antigravity");
     total.metadata = {
       lastActivity: new Date(conversation.lastActivity).toISOString(),
     };
@@ -231,18 +193,16 @@ export async function antigravityReport(
           catalog,
         ),
       };
-      append(total, model);
-      const date = new Date(`${bucket.day}T00:00:00Z`);
-      date.setUTCDate(date.getUTCDate() - ((date.getUTCDay() + 6) % 7));
+      addModelUsage(total, model);
       const keys = {
         daily: bucket.day,
-        weekly: date.toISOString().slice(0, 10),
+        weekly: weekOf(bucket.day),
         monthly: bucket.day.slice(0, 7),
       };
       for (const kind of ["daily", "weekly", "monthly"] as const) {
         const key = keys[kind];
-        const row = periods[kind].get(key) ?? empty(key);
-        append(row, model);
+        const row = periods[kind].get(key) ?? emptyRow(key, "antigravity");
+        addModelUsage(row, model);
         periods[kind].set(key, row);
       }
     }
@@ -272,36 +232,17 @@ export function mergeAntigravity(base: RawReport, extra: RawReport): RawReport {
       const agents = (row.agents ?? [row]).filter(
         (agent) => !/antigravity/i.test(agent.agent),
       );
-      const clean = { ...empty(row.period), agent: "all", agents: [...agents] };
-      for (const agent of agents) {
-        for (const key of [
-          "totalTokens",
-          "totalCost",
-          "inputTokens",
-          "outputTokens",
-          "cacheCreationTokens",
-          "cacheReadTokens",
-        ] as const)
-          clean[key] += agent[key];
-      }
+      const clean = { ...emptyRow(row.period, "all"), agents };
+      for (const agent of agents) addTotals(clean, agent);
       grouped.set(row.period, clean);
     }
     for (const row of extra[kind]) {
       const total = grouped.get(row.period) ?? {
-        ...empty(row.period),
-        agent: "all",
+        ...emptyRow(row.period, "all"),
         agents: [],
       };
       total.agents!.push(row);
-      for (const key of [
-        "totalTokens",
-        "totalCost",
-        "inputTokens",
-        "outputTokens",
-        "cacheCreationTokens",
-        "cacheReadTokens",
-      ] as const)
-        total[key] += row[key];
+      addTotals(total, row);
       grouped.set(row.period, total);
     }
     result[kind] = [...grouped.values()];

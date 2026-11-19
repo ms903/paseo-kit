@@ -10,7 +10,7 @@ import { z } from "zod";
 // then fall back to a `ccusage` on PATH.
 const NATIVE_PACKAGE = `@ccusage/ccusage-${process.platform}-${process.arch}`;
 const BINARY_NAME = process.platform === "win32" ? "ccusage.exe" : "ccusage";
-const RUN_TIMEOUT_MS = 60_000;
+const RUN_TIMEOUT_MS = 5 * 60_000;
 const MAX_OUTPUT_BYTES = 64 * 1024 * 1024;
 
 function paseoHome(): string {
@@ -93,27 +93,24 @@ const rawRow = rawAgentRow.extend({
   metadata: z.object({ lastActivity: z.string().optional() }).loose().optional(),
 });
 
-const rawReport = z.object({
-  daily: z.array(rawRow).default([]),
-  weekly: z.array(rawRow).default([]),
-  monthly: z.array(rawRow).default([]),
-  session: z.array(rawRow).default([]),
-});
+const reportRows = z.array(rawRow);
 
 export type RawModel = z.infer<typeof rawModel>;
 export type RawAgentRow = z.infer<typeof rawAgentRow>;
 export type RawRow = z.infer<typeof rawRow>;
-export type RawReport = z.infer<typeof rawReport>;
+export type RawReport = Record<"daily" | "weekly" | "monthly" | "session", RawRow[]>;
+type ScanKind = "daily" | "session";
 
 export function describeCcusageFailure(
   { code, killed, signal }: Pick<ExecFileException, "code" | "killed" | "signal">,
   stderr: string,
+  kind: ScanKind,
 ): string {
   if (code === "ENOENT") return "ccusage executable was not found";
   if (code === "EACCES" || code === "EPERM") return "Permission denied when starting ccusage";
   if (code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER") return "ccusage output exceeded the size limit";
   if (code === "ABORT_ERR") return "ccusage was cancelled";
-  if (killed && signal === "SIGTERM") return `ccusage timed out after ${RUN_TIMEOUT_MS / 1000} seconds`;
+  if (killed && signal === "SIGTERM") return `ccusage ${kind} scan timed out after ${RUN_TIMEOUT_MS / 1000} seconds`;
   if (signal) return `ccusage was terminated (${signal})`;
 
   const status = code == null ? "ccusage exited" : `ccusage exited (${code})`;
@@ -121,43 +118,49 @@ export function describeCcusageFailure(
   return detail ? `${status}. ${detail}` : status;
 }
 
-/** One ccusage run loads the agent logs and emits all sections. */
-export function runCcusage(timezone: string, signal?: AbortSignal): Promise<RawReport> {
+export function runCcusage(kind: ScanKind, timezone: string, signal: AbortSignal, since?: string): Promise<RawRow[]> {
   const binary = locateCcusage();
   const args = [
+    kind,
     "--json",
     "--offline",
-    "--sections",
-    "daily,weekly,monthly,session",
     "--by-agent",
     "--timezone",
     timezone,
     "--no-color",
   ];
+  if (since) args.push("--since", since);
   return new Promise((resolve, reject) => {
-    execFile(
+    const child = execFile(
       binary.file,
       args,
       {
         timeout: RUN_TIMEOUT_MS,
         maxBuffer: MAX_OUTPUT_BYTES,
         signal,
-        // The plugin's reader already supplies the Antigravity rows. An empty override tells
-        // ccusage to skip its own scan, including its second pass for the session section.
+        // The plugin's SQLite reader supplies Antigravity.
         env: { ...process.env, NO_COLOR: "1", ANTIGRAVITY_DATA_DIR: "" },
         windowsHide: true,
       },
       (error, stdout, stderr) => {
         if (error) {
-          reject(new Error(describeCcusageFailure(error, stderr)));
+          reject(new Error(describeCcusageFailure(error, stderr, kind)));
           return;
         }
         try {
-          resolve(rawReport.parse(JSON.parse(stdout)));
+          resolve(reportRows.parse(JSON.parse(stdout)[kind]));
         } catch (parseError) {
           reject(new Error(`Unexpected ccusage output: ${(parseError as Error).message}`));
         }
       },
     );
+    if (child.pid) {
+      try {
+        const priority = os.constants.priority.PRIORITY_BELOW_NORMAL;
+        if (os.getPriority(child.pid) < priority) os.setPriority(child.pid, priority);
+      } catch {
+        // Some hosts restrict changing the scheduling priority.
+      }
+    }
   });
 }

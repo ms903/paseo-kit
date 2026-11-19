@@ -18,12 +18,14 @@ import {
 } from "./ccusage";
 import { createReportPricer } from "./codex-prices";
 import { createPriceCatalog } from "./price-catalog";
+import { createUsageHistory } from "./usage-history";
+import { rollupDays } from "./usage-rows";
 
 export type UsageReport = RpcOutput<typeof usageReportRpc>;
 
-// A report older than this is served once more while a fresh one loads in the background.
+// Minimum interval between automatic report scans.
 const FRESH_MS = 60_000;
-// Coalesce bursts of finished turns into one ccusage run.
+// Coalesce bursts of finished turns into one refresh.
 const INVALIDATE_DEBOUNCE_MS = 4_000;
 // Only refresh eagerly after a turn when someone looked at the numbers recently.
 const ACTIVE_READER_MS = 15 * 60_000;
@@ -142,10 +144,9 @@ function agentOrder(raw: RawReport): string[] {
     .map(([agent]) => agent);
 }
 
-function buildReport(raw: RawReport, timezone: string, today: string): UsageReport {
-  const sessions = raw.session.map(sessionOf);
+function buildReport(raw: RawReport, timezone: string, today: string, generatedAt: number, sessions: SessionUsage[]): UsageReport {
   return {
-    generatedAt: Date.now(),
+    generatedAt,
     today,
     timezone,
     agents: agentOrder(raw),
@@ -169,22 +170,20 @@ export interface ReportCache {
   updatePrices(): Promise<UsageReport>;
   /** Every session ccusage knows, for matching Paseo agents. */
   sessions(): Promise<SessionUsage[]>;
-  /** Marks the report stale and refreshes it soon if anyone is watching. */
+  /** Refreshes a due report after a turn if anyone is watching. */
   invalidate(): void;
   stop(): void;
 }
 
-export function createReportCache(): ReportCache {
+export function createReportCache(scan = runCcusage): ReportCache {
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
   const lifetime = new AbortController();
   const priceCatalog = createPriceCatalog(lifetime.signal);
   const applyPrices = createReportPricer();
+  const history = createUsageHistory(timezone, lifetime.signal, scan);
   let snapshot: Snapshot | null = null;
-  let fetchedAt = 0;
-  let attemptedAt = 0;
-  // Bumped by every finished turn; a run that started before the last bump is already stale.
-  let invalidations = 0;
-  let freshAs = 0;
+  let nextRefreshAt = 0;
+  let failures = 0;
   let refreshError: string | null = null;
   let inflight: Promise<Snapshot> | null = null;
   let lastReadAt = 0;
@@ -193,31 +192,39 @@ export function createReportCache(): ReportCache {
 
   const refresh = (): Promise<Snapshot> => {
     inflight ??= (async () => {
-      attemptedAt = Date.now();
-      const seen = invalidations;
+      const start = Date.now();
       try {
         const prices = priceCatalog.read();
         const scans = [
-          runCcusage(timezone, lifetime.signal),
+          history.readDays(localToday(timezone)),
           antigravityReport(timezone, lifetime.signal, undefined, prices),
           prices,
         ] as const;
-        const [base, antigravity, catalog] = await Promise.all(scans).finally(
+        const [daily, antigravity, catalog] = await Promise.all(scans).finally(
           () => Promise.allSettled(scans),
         );
+        const generatedAt = Date.now();
+        const today = localToday(timezone);
+        const session = await history.readSessions();
+        const base: RawReport = { daily, weekly: [], monthly: [], session: session.rows };
         await applyPrices(base, timezone, catalog, lifetime.signal);
+        base.weekly = rollupDays(base.daily, "weekly");
+        base.monthly = rollupDays(base.daily, "monthly");
         const raw = mergeAntigravity(base, antigravity);
+        const sessions = raw.session.map(sessionOf);
         const next = {
-          report: buildReport(raw, timezone, localToday(timezone)),
-          sessions: raw.session.map(sessionOf),
+          report: { ...buildReport(raw, timezone, today, generatedAt, sessions), sessionRefreshError: session.error },
+          sessions,
         };
         snapshot = next;
-        fetchedAt = Date.now();
-        freshAs = seen;
+        nextRefreshAt = Date.now() + Math.min(15 * FRESH_MS, Math.max(FRESH_MS, (generatedAt - start) * 2));
+        failures = 0;
         refreshError = null;
         return next;
       } catch (error) {
-        attemptedAt = Date.now();
+        failures = Math.min(failures + 1, 5);
+        const delay = Math.max(FRESH_MS * 2 ** (failures - 1), (Date.now() - start) * 2);
+        nextRefreshAt = Date.now() + Math.min(15 * FRESH_MS, delay);
         refreshError = (error as Error).message;
         if (!lifetime.signal.aborted) console.error(`[ccusage-stats] ${refreshError}`);
         throw error;
@@ -230,8 +237,11 @@ export function createReportCache(): ReportCache {
 
   const current = async (): Promise<Snapshot> => {
     lastReadAt = Date.now();
-    if (!snapshot) return refresh();
-    if ((freshAs !== invalidations || Date.now() - fetchedAt > FRESH_MS) && Date.now() - attemptedAt >= FRESH_MS) {
+    if (!snapshot) {
+      if (!inflight && refreshError && Date.now() < nextRefreshAt) throw new Error(refreshError);
+      return refresh();
+    }
+    if (Date.now() >= nextRefreshAt) {
       refresh().catch(() => {
         // Logged in refresh; the stale snapshot below carries the error.
       });
@@ -263,11 +273,10 @@ export function createReportCache(): ReportCache {
       return (await current()).sessions;
     },
     invalidate() {
-      invalidations += 1;
       if (debounce) clearTimeout(debounce);
       debounce = setTimeout(() => {
         debounce = null;
-        if (Date.now() - lastReadAt < ACTIVE_READER_MS && Date.now() - attemptedAt >= FRESH_MS) refresh().catch(() => {});
+        if (Date.now() - lastReadAt < ACTIVE_READER_MS && Date.now() >= nextRefreshAt) refresh().catch(() => {});
       }, INVALIDATE_DEBOUNCE_MS);
     },
     stop() {

@@ -47,6 +47,7 @@ const usageReportSchema = z.object({
   weekly: z.array(periodSchema),
   monthly: z.array(periodSchema),
   recentSessions: z.array(sessionSchema),
+  sessionRefreshError: z.string().nullable().optional(),
   /** Set when the latest refresh failed and an older report is served instead. */
   refreshError: z.string().nullable(),
 });
