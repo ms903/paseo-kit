@@ -70,16 +70,27 @@ export function formatPeriodShort(kind: PeriodKind, key: string): string {
     : shortDay.format(date);
 }
 
-export function formatPeriodRange(kind: PeriodKind, key: string, through?: string): string {
-  const start = dateOf(key);
-  if (kind === "daily") return longDay.format(start);
+function periodEnd(kind: PeriodKind, start: Date, through?: string): Date {
+  if (kind === "daily") return start;
   const year = start.getUTCFullYear();
   const month = start.getUTCMonth();
   const end = kind === "monthly"
     ? new Date(Date.UTC(year, month + 1, 0))
     : new Date(Date.UTC(year, month, start.getUTCDate() + 6));
   const reportDay = through ? dateOf(through) : end;
-  const last = reportDay >= start && reportDay < end ? reportDay : end;
+  return reportDay >= start && reportDay < end ? reportDay : end;
+}
+
+export function periodDateBounds(kind: PeriodKind, key: string, through?: string) {
+  const start = dateOf(key);
+  return { since: start.toISOString().slice(0, 10), until: periodEnd(kind, start, through).toISOString().slice(0, 10) };
+}
+
+export function formatPeriodRange(kind: PeriodKind, key: string, through?: string): string {
+  const start = dateOf(key);
+  const last = periodEnd(kind, start, through);
+  const year = start.getUTCFullYear();
+  const month = start.getUTCMonth();
   if (last.valueOf() === start.valueOf()) return longDay.format(start);
   if (last.getUTCFullYear() !== year) return `${longDay.format(start)} – ${longDay.format(last)}`;
   if (last.getUTCMonth() !== month) return `${shortDay.format(start)} – ${shortDay.format(last)}, ${year}`;

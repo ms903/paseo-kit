@@ -26,7 +26,7 @@ const periodSchema = z.object({
   agents: z.array(agentUsageSchema),
 });
 
-const sessionSchema = z.object({
+export const sessionSchema = z.object({
   id: z.string(),
   agent: z.string(),
   usage: usageSchema,
@@ -120,6 +120,26 @@ export const sessionUsageRpc = defineRpc({
   name: "usage.sessions",
   input: z.object({ agentIds: z.array(z.string()).max(200) }),
   output: z.object({ generatedAt: z.number(), sessions: z.array(sessionMatchSchema) }),
+});
+
+export const SESSION_PAGE_SIZE = 12;
+
+export const sessionListRpc = defineRpc({
+  name: "usage.sessions.list",
+  input: z.object({
+    agent: z.string().max(120).optional(),
+    search: z.string().max(120).optional(),
+    since: z.iso.date().optional(),
+    until: z.iso.date().optional(),
+    offset: z.int().nonnegative().optional(),
+  }),
+  output: z.object({
+    sessions: z.array(sessionSchema).max(SESSION_PAGE_SIZE),
+    agents: z.array(z.string()),
+    total: z.int().nonnegative(),
+    offset: z.int().nonnegative(),
+    complete: z.boolean(),
+  }),
 });
 
 export type Usage = z.infer<typeof usageSchema>;

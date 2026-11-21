@@ -7,18 +7,14 @@ import {
   Pressable, ScrollView, Text, View, type PressableStateCallbackType, type TextStyle, type ViewStyle,
 } from "react-native";
 import { updatePricesRpc, type UsagePeriod, type UsageView } from "../shared/usage";
-import { Legend, PERIOD_OPTIONS, PeriodBars, Segmented, SwatchDot } from "./charts";
+import { Legend, PERIOD_OPTIONS, PeriodBars, Segmented } from "./charts";
+import { SESSION_USAGE_KEY, USAGE_REPORT_KEY, useUsageReport, type UsageReport } from "./data";
 import {
-  agentSwatch, SESSION_USAGE_KEY, USAGE_REPORT_KEY, useUsageReport, type UsageReport,
-} from "./data";
-import {
-  agentLabel, formatCost, formatPercent, formatPeriodLong, formatPeriodRange, formatTokens,
-  reportTimeFormatter, shortSessionId,
+  formatCost, formatPercent, formatPeriodLong, formatPeriodRange, formatTokens, periodDateBounds, reportTimeFormatter,
 } from "./format";
-import {
-  AgentList, Composition, FONT, TodayUsage, TokenChange, UsageAmounts, UsageTableHeader, usageColumns,
-} from "./summary";
+import { AgentList, Composition, FONT, TodayUsage, TokenChange } from "./summary";
 import { RefreshUsageButton, UsageRefreshStatus } from "./refresh";
+import { SessionList } from "./session-list";
 
 type HoverState = PressableStateCallbackType & { hovered?: boolean };
 
@@ -141,63 +137,9 @@ function PeriodOverview({
   );
 }
 
-function RecentSessions({
-  theme,
-  report,
-  clock,
-  narrow,
-}: {
-  theme: PluginTheme;
-  report: UsageReport;
-  clock: Intl.DateTimeFormat;
-  narrow: boolean;
-}) {
-  const { agents, recentSessions } = report;
-  const columns = narrow ? undefined : usageColumns(recentSessions.map((session) => session.usage));
-  return (
-    <Panel theme={theme} title="Recent sessions">
-      {report.sessionRefreshError ? (
-        <Text style={{ fontSize: FONT.body, color: theme.colors.statusWarning }}>
-          Could not refresh sessions. {report.sessionRefreshError}
-        </Text>
-      ) : null}
-      {recentSessions.length === 0 ? (
-        report.sessionRefreshError ? null : <Text style={{ fontSize: FONT.body, color: theme.colors.foregroundMuted }}>No sessions yet.</Text>
-      ) : (
-        <View>
-          <UsageTableHeader theme={theme} label="Session" columns={columns} />
-          {recentSessions.map((session, index) => {
-            const lastActivity = Date.parse(session.lastActivity ?? "");
-            const date = Number.isFinite(lastActivity) ? clock.format(lastActivity) : null;
-            return (
-              <View key={`${session.agent}:${session.id}`} style={{
-                flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 8,
-                borderTopWidth: index > 0 ? 1 : 0, borderTopColor: theme.colors.border,
-              }}>
-                <SwatchDot swatch={agentSwatch(theme, agents, session.agent)} />
-                <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
-                  <Text style={{ fontSize: FONT.body, color: theme.colors.foreground }}>
-                    {agentLabel(session.agent)}
-                    <Text style={{ color: theme.colors.foregroundMuted, fontVariant: ["tabular-nums"] }}>
-                      {`  ${shortSessionId(session.id)}`}
-                    </Text>
-                  </Text>
-                  <Text style={{ fontSize: FONT.caption, color: theme.colors.foregroundMuted }}>
-                    {[session.models[0]?.model, date].filter(Boolean).join(" · ")}
-                  </Text>
-                </View>
-                <UsageAmounts theme={theme} usage={session.usage} columns={columns} />
-              </View>
-            );
-          })}
-        </View>
-      )}
-    </Panel>
-  );
-}
-
 function Body({
   theme,
+  hostId,
   compact,
   report,
   actions,
@@ -205,6 +147,7 @@ function Body({
   initialPeriod,
 }: {
   theme: PluginTheme;
+  hostId: string;
   compact: boolean;
   report: UsageReport;
   actions: ReactNode;
@@ -224,6 +167,10 @@ function Body({
   const narrow = compact || (width > 0 && width < 610);
   const split = !compact && width >= 740;
   const clock = useMemo(() => reportTimeFormatter(timezone), [timezone]);
+  const sessionPeriod = period && kind !== "total" ? {
+    ...periodDateBounds(kind, period.period, today),
+    label: formatPeriodRange(kind, period.period, today),
+  } : undefined;
   const select = (index: number) => {
     setPickedKey(index === periods.length - 1 ? null : periods[index]?.period ?? null);
   };
@@ -326,9 +273,9 @@ function Body({
         </Panel>
       ) : null}
 
-      {report.recentSessions.length > 0 || report.sessionRefreshError || !report.sessionsPending ? (
-        <RecentSessions theme={theme} report={report} clock={clock} narrow={narrow} />
-      ) : null}
+      <Panel theme={theme} title="Sessions">
+        <SessionList theme={theme} hostId={hostId} report={report} clock={clock} narrow={narrow} period={sessionPeriod} />
+      </Panel>
     </View>
   );
 }
@@ -374,6 +321,7 @@ export function UsageScreen({ theme, host, layout, params }: PluginScreenProps) 
   );
   return (
     <ScrollView
+      keyboardShouldPersistTaps="handled"
       style={{ flex: 1, backgroundColor: theme.colors.surface0 }}
       contentContainerStyle={{ padding: layout.compact ? 12 : 24, alignItems: "center" }}
     >
@@ -382,6 +330,7 @@ export function UsageScreen({ theme, host, layout, params }: PluginScreenProps) 
           <Body
             key={`${host.id}:${initialKind}:${params.period ?? ""}`}
             theme={theme}
+            hostId={host.id}
             compact={layout.compact}
             report={data}
             actions={actions}

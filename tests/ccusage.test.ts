@@ -9,6 +9,8 @@ import { joinSessions, rollupDays } from "../plugins/ccusage-stats/server/usage-
 import { createUsageHistory } from "../plugins/ccusage-stats/server/usage-history";
 import { createUsageStore } from "../plugins/ccusage-stats/server/usage-store";
 import { createReportCache, localToday, type ReportCache } from "../plugins/ccusage-stats/server/report";
+import { createSessionList } from "../plugins/ccusage-stats/server/session-list";
+import { SESSION_PAGE_SIZE } from "../plugins/ccusage-stats/shared/usage";
 
 test("identifies ccusage timeouts, termination signals, and quiet exit codes", () => {
   assert.equal(describeCcusageFailure({ killed: true, signal: "SIGTERM" }, "", "session"), "ccusage session scan timed out after 300 seconds");
@@ -267,6 +269,56 @@ test("report and session RPCs return during a slow cold scan, then restore a dis
   assert.equal(await createUsageStore(next.timezone === "UTC" ? "Asia/Tokyo" : "UTC", root).readReport(), undefined);
   await writeFile(compressed, "incomplete");
   assert.equal(await store.readReport(), undefined);
+});
+
+test("filters and pages lifetime sessions outside the recent report without a log scan after restart", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: new Date("2026-11-21T10:00:00Z") });
+  const root = await mkdtemp(path.join(os.tmpdir(), "paseo-session-list-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const day = localToday(Intl.DateTimeFormat().resolvedOptions().timeZone);
+  const latest = Array.from({ length: SESSION_PAGE_SIZE + 1 }, (_, i) => ({
+    ...row(`session-${i}`, 100),
+    metadata: { lastActivity: `2026-11-21T08:${String(i).padStart(2, "0")}:00Z` },
+  }));
+  const older = { ...row("archived-8f75ade9", 240, "pi"), metadata: { lastActivity: "2026-11-19T16:15:00Z" } };
+  older.modelBreakdowns.push({ ...older.modelBreakdowns[0], modelName: "gemini-4-neon" });
+  let scans = 0;
+  const cache = createReportCache(async (kind, _timezone, _signal, _since, until) => {
+    scans++;
+    return kind === "daily" ? (until ? [] : [row(day, 100)]) : (until ? [older] : latest);
+  }, root);
+  t.after(() => cache.stop());
+  const report = await complete(cache);
+  assert.equal(report.recentSessions.length, SESSION_PAGE_SIZE);
+  const scansAfterRefresh = scans;
+  const first = await cache.listSessions({});
+  const second = await cache.listSessions({ offset: SESSION_PAGE_SIZE });
+  assert.equal(first.total, latest.length + 1);
+  assert.equal(first.sessions[0].id, latest.at(-1)?.period);
+  assert.deepEqual(second.sessions.map(({ id }) => id), [latest[0].period, older.period]);
+  assert.deepEqual(second.agents, ["codex", "pi"]);
+  assert.equal(second.complete, true);
+  assert.equal((await cache.listSessions({ offset: 1_000_000 })).offset, SESSION_PAGE_SIZE);
+  assert.equal((await cache.listSessions({ agent: "codex", search: "NEON" })).total, 0);
+  assert.equal(scans, scansAfterRefresh);
+  cache.stop();
+
+  const reopened = createReportCache(async () => { scans++; return []; }, root);
+  t.after(() => reopened.stop());
+  const filtered = await reopened.listSessions({ agent: "pi", search: "  NeOn  " });
+  assert.equal(filtered.complete, true);
+  assert.equal(filtered.total, 1);
+  assert.deepEqual(filtered.sessions[0].models.map(({ model }) => model), ["fixture", "gemini-4-neon"]);
+  assert.equal((await reopened.listSessions({ search: "8F75ADE9" })).sessions[0].id, older.period);
+  assert.equal(scans, scansAfterRefresh);
+  const restored = await reopened.read();
+  assert.ok(!("status" in restored));
+  assert.equal("olderSessions" in restored, false);
+
+  const list = createSessionList("Asia/Hong_Kong");
+  const catalog = [filtered.sessions[0], { ...filtered.sessions[0], id: "unknown-date", lastActivity: null }];
+  assert.equal(list(catalog, { until: "2026-11-19" }, true).total, 0);
+  assert.deepEqual(list(catalog, { since: "2026-11-20", until: "2026-11-20" }, true).sessions, filtered.sessions);
 });
 
 test("identical daily metrics skip session scans, and redistribute or reconnect after the verification interval", async (t) => {

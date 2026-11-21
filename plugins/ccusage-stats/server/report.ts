@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { createAntigravityReport, mergeAntigravity } from "./antigravity";
 import {
   EMPTY_USAGE,
+  SESSION_PAGE_SIZE,
   type AgentUsage,
   type ModelUsage,
   type SessionUsage,
@@ -24,11 +25,11 @@ import { createPriceCatalog, type PriceCatalog } from "./price-catalog";
 import { createUsageHistory, oldestReportDay, REPORT_MONTHS, type RecentSessions, type RefreshMode } from "./usage-history";
 import { emptyRow, rollupDays } from "./usage-rows";
 import { createUsageStore } from "./usage-store";
+import { createSessionList, type SessionListInput, type SessionListResult } from "./session-list";
 
 const AUTO_REFRESH_MS = 45 * 60_000;
 const MAX_RETRY_DELAY_MS = 3 * 60 * 60_000;
 const SERIES_LENGTH = { daily: 30, weekly: 12, monthly: REPORT_MONTHS } as const;
-const RECENT_SESSIONS = 12;
 const DAY_MS = 86_400_000;
 
 function usageOf(row: RawAgentRow | RawModel, total?: number, cost?: number): Usage {
@@ -159,9 +160,7 @@ function buildReport(
     weekly: series("weekly", raw.weekly, today, from),
     monthly: series("monthly", raw.monthly, today, from),
     total: allDates ? periodOf(total ?? emptyRow("total", "all")) : undefined,
-    recentSessions: [...sessions]
-      .sort((a, b) => (b.lastActivity ?? "").localeCompare(a.lastActivity ?? ""))
-      .slice(0, RECENT_SESSIONS),
+    recentSessions: sessions.slice(0, SESSION_PAGE_SIZE),
     refreshError: null,
   };
 }
@@ -169,6 +168,7 @@ function buildReport(
 interface Snapshot {
   report: UsageReport;
   sessions: SessionUsage[];
+  sessionsComplete: boolean;
 }
 
 export interface ReportCache {
@@ -176,6 +176,7 @@ export interface ReportCache {
   read(refresh: boolean | undefined, knownRevision: string | undefined): Promise<UsageRead>;
   updatePrices(): Promise<ReportResponse>;
   sessions(): Promise<SessionUsage[]>;
+  listSessions(input: SessionListInput): Promise<SessionListResult>;
   stop(): void;
 }
 
@@ -187,6 +188,7 @@ export function createReportCache(scan = runCcusage, cacheDirectory?: string): R
   const priceCatalog = createPriceCatalog(signal);
   const preparePrices = createReportPricer(undefined, store);
   const readAntigravity = createAntigravityReport(store);
+  const sessionList = createSessionList(timezone);
   const history = createUsageHistory(timezone, signal, scan, store, (kind, since, until) => {
     const window = { since, until };
     if (kind === "daily") startStage(until ? "dailyHistory" : "recentUsage", window);
@@ -205,6 +207,7 @@ export function createReportCache(scan = runCcusage, cacheDirectory?: string): R
   let priceUpdate: Promise<ReportResponse> | null = null;
   let pricesChanged = false;
   let manualRequested = false;
+  let browsingSessions = false;
   let stage: { name: ScanProgress["stage"]; start: number; window?: ScanProgress["window"] } | undefined;
   const codexReads = new Set<string>();
 
@@ -235,6 +238,9 @@ export function createReportCache(scan = runCcusage, cacheDirectory?: string): R
     if ((sessionsPending || options.sessionError) && !base.session.length && snapshot) {
       sessions.push(...snapshot.sessions.filter((row) => row.agent !== "antigravity"));
     }
+    sessions.sort((a, b) => (b.lastActivity ?? "").localeCompare(a.lastActivity ?? "")
+      || a.agent.localeCompare(b.agent) || a.id.localeCompare(b.id));
+    const sessionsComplete = (!sessionsPending && !options.sessionError) || !!snapshot?.sessionsComplete;
     const report = buildReport(raw, timezone, today, Date.now(), sessions, {
       from: options.from, allDates: !options.from && history.allDates,
     });
@@ -243,8 +249,10 @@ export function createReportCache(scan = runCcusage, cacheDirectory?: string): R
     report.sessionRefreshError = options.sessionError ?? null;
     report.usageRefreshedAt = options.refreshed ? report.generatedAt : snapshot?.report.usageRefreshedAt;
     version++;
-    snapshot = { report, sessions };
-    await store.saveReport(report);
+    snapshot = { report, sessions, sessionsComplete };
+    const olderSessions = sessionsComplete && sessions.length >= SESSION_PAGE_SIZE
+      ? sessions.slice(SESSION_PAGE_SIZE) : undefined;
+    await store.saveReport({ ...report, olderSessions });
   }
 
   async function refresh(mode: RefreshMode) {
@@ -340,7 +348,8 @@ export function createReportCache(scan = runCcusage, cacheDirectory?: string): R
       const report = snapshot?.report;
       const lastChecked = report?.usageRefreshedAt;
       // Reuse a fresh, complete report even after the daemon restarts.
-      if (report?.total && !report.sessionsPending && !report.sessionRefreshError &&
+      const needsSessionIndex = browsingSessions && !snapshot?.sessionsComplete;
+      if (!needsSessionIndex && report?.total && !report.sessionsPending && !report.sessionRefreshError &&
         lastChecked !== undefined && lastChecked <= now && now - lastChecked < AUTO_REFRESH_MS) return;
     }
     running = true;
@@ -353,8 +362,16 @@ export function createReportCache(scan = runCcusage, cacheDirectory?: string): R
     // Give a local cache hit one short read on the first request. Log scans never hold the RPC.
     startup ??= new Promise<void>((resolve) => {
       const timer = setTimeout(resolve, 100);
-      void store.readReport().then((report) => {
-        if (report && !signal.aborted) snapshot = { report, sessions: report.recentSessions };
+      void store.readReport().then((saved) => {
+        if (!saved || signal.aborted) return;
+        const { olderSessions, ...report } = saved;
+        snapshot = {
+          report,
+          sessions: report.recentSessions.concat(olderSessions ?? []),
+          sessionsComplete: olderSessions !== undefined || (
+            report.recentSessions.length < SESSION_PAGE_SIZE && !report.sessionsPending && !report.sessionRefreshError
+          ),
+        };
       }).finally(() => {
         clearTimeout(timer);
         restored = true;
@@ -398,6 +415,11 @@ export function createReportCache(scan = runCcusage, cacheDirectory?: string): R
     async sessions() {
       await current();
       return snapshot?.sessions ?? [];
+    },
+    async listSessions(input) {
+      browsingSessions = true;
+      await current();
+      return sessionList(snapshot?.sessions ?? [], input, snapshot?.sessionsComplete ?? false);
     },
     stop() { lifetime.abort(); },
   };

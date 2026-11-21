@@ -5,7 +5,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { gzip, gunzip } from "node:zlib";
 import { z } from "zod";
-import { usageReportSchema, type UsageReport } from "../shared/usage";
+import { sessionSchema, usageReportSchema } from "../shared/usage";
 import { paseoHome, reportRows, type ScanKind } from "./ccusage";
 
 const MIB = 1024 * 1024;
@@ -29,6 +29,8 @@ const historySchema = z.object({
   allDates: z.literal(true).optional(),
 });
 export type SavedHistory = z.infer<typeof historySchema>;
+const savedReportSchema = usageReportSchema.extend({ olderSessions: z.array(sessionSchema).optional() });
+type SavedReport = z.infer<typeof savedReportSchema>;
 
 export function createUsageStore(timezone: string, directory = path.join(paseoHome(), "cache", "ccusage-stats"), signal?: AbortSignal) {
   const sources = SOURCE_PATHS.map((name) => process.env[name]);
@@ -90,13 +92,14 @@ export function createUsageStore(timezone: string, directory = path.join(paseoHo
     }
   }
 
-  function contentOf(report: UsageReport): string {
+  function contentOf(report: SavedReport): string {
     const { today, timezone, agents, daily, weekly, monthly, recentSessions, sessionRefreshError } = report;
     const values: unknown[] = [
       today, timezone, agents, daily, weekly, monthly, recentSessions,
       sessionRefreshError, report.historyPending, report.sessionsPending,
     ];
     if (report.total) values.push(report.total);
+    if (report.olderSessions) values.push(report.olderSessions);
     return createHash("sha256").update(JSON.stringify(values)).digest("hex");
   }
 
@@ -165,7 +168,7 @@ export function createUsageStore(timezone: string, directory = path.join(paseoHo
       };
     },
     async readReport() {
-      const report = await read("report.json.gz", REPORT_LIMIT, usageReportSchema);
+      const report = await read("report.json.gz", REPORT_LIMIT, savedReportSchema);
       if (!report || report.timezone !== timezone || !report.daily.length) return;
       if (!report.historyPending && (!report.weekly.length || !report.monthly.length)) return;
       lastContent = contentOf(report);
@@ -174,10 +177,17 @@ export function createUsageStore(timezone: string, directory = path.join(paseoHo
       savedRefreshAt = report.usageRefreshedAt;
       return report;
     },
-    async saveReport(report: UsageReport) {
-      const content = contentOf(report);
+    async saveReport(report: SavedReport) {
+      let content = contentOf(report);
       if (content === lastContent) return saveRefreshTime(report.usageRefreshedAt);
-      lastContent = await write("report.json.gz", report, REPORT_LIMIT) ? content : "";
+      let saved = await write("report.json.gz", report, REPORT_LIMIT);
+      if (!saved && report.olderSessions && !signal?.aborted) {
+        const { olderSessions, ...overview } = report;
+        content = contentOf(overview);
+        if (content === lastContent) return saveRefreshTime(report.usageRefreshedAt);
+        saved = await write("report.json.gz", overview, REPORT_LIMIT);
+      }
+      lastContent = saved ? content : "";
       savedRefreshAt = report.usageRefreshedAt;
     },
     saveRefreshTime,

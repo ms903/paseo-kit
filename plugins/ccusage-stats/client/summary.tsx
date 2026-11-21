@@ -1,8 +1,8 @@
 import type { PluginTheme } from "@getpaseo/plugin";
 import { Icon } from "@getpaseo/plugin/client/react-native";
 import { useState } from "react";
-import { Pressable, Text, View, type PressableStateCallbackType, type TextStyle } from "react-native";
-import type { AgentUsage, TodayPreview, Usage, UsagePeriod, UsageView } from "../shared/usage";
+import { Pressable, Text, View, type PressableStateCallbackType, type TextStyle, type ViewStyle } from "react-native";
+import type { ModelUsage, TodayPreview, Usage, UsagePeriod, UsageView } from "../shared/usage";
 import { ShareBar, SwatchDot, type ShareSegment } from "./charts";
 import { agentSwatch, foldAgents } from "./data";
 import {
@@ -226,21 +226,20 @@ export function UsageTableHeader({
   );
 }
 
-function ModelRows({
+export function ModelRows({
   theme,
-  agent,
+  models,
   columns,
+  style,
 }: {
   theme: PluginTheme;
-  agent: AgentUsage;
+  models: readonly ModelUsage[];
   columns?: UsageColumns;
+  style?: ViewStyle;
 }) {
   return (
-    <View style={{
-      backgroundColor: theme.colors.surface0, borderRadius: 6, paddingLeft: 16, paddingRight: 24,
-      marginBottom: 8,
-    }}>
-      {agent.models.map((model) => (
+    <View style={style}>
+      {models.map((model) => (
         <View key={model.model} style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 6 }}>
           <Text style={{ flex: 1, minWidth: 0, fontSize: FONT.body, color: theme.colors.foregroundMuted }}>
             {model.model}
@@ -325,7 +324,12 @@ export function AgentList({
                 {row}
               </Pressable>
             ) : row}
-            {open ? <ModelRows theme={theme} agent={agent} columns={columns} /> : null}
+            {open ? (
+              <ModelRows theme={theme} models={agent.models} columns={columns} style={{
+                backgroundColor: theme.colors.surface0, borderRadius: 6,
+                paddingLeft: 16, paddingRight: 24, marginBottom: 8,
+              }} />
+            ) : null}
           </View>
         );
       })}

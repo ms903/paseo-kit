@@ -7,6 +7,7 @@ import {
   formatPeriodShort,
   formatScanProgress,
   formatTokens,
+  periodDateBounds,
   reportTimeFormatter,
 } from "../plugins/ccusage-stats/client/format";
 
@@ -30,6 +31,8 @@ test("shows the report's exact calendar dates and inclusive date ranges", () => 
   assert.equal(formatPeriodRange("monthly", "2026-11", "2026-11-18"), "Nov 1–18, 2026");
   assert.equal(formatPeriodRange("monthly", "2026-10", "2026-11-18"), "Oct 1–31, 2026");
   assert.equal(formatPeriodRange("monthly", "2024-02"), "Feb 1–29, 2024");
+  assert.deepEqual(periodDateBounds("monthly", "2024-02"), { since: "2024-02-01", until: "2024-02-29" });
+  assert.deepEqual(periodDateBounds("weekly", "2026-11-16", "2026-11-18"), { since: "2026-11-16", until: "2026-11-18" });
   assert.equal(formatPeriodLong("weekly", "2026-11-16", "2026-11-18"), "Nov 16–18, 2026");
   assert.equal(
     formatPeriodLong("weekly", "2026-12-28"),
