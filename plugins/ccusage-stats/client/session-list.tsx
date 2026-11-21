@@ -78,6 +78,8 @@ export function SessionList({ theme, hostId, report, clock, narrow, period }: {
     placeholderData: (previous, previousQuery) =>
       previousQuery?.queryKey[1] === hostId && previousQuery.queryKey[3] === filter ? previous : undefined,
     retry: false,
+    refetchInterval: ({ state }) => state.data?.complete === false && !report.sessionRefreshError && !report.refreshError
+      ? 10_000 : false,
     staleTime: Infinity,
     gcTime: 60_000,
   });
