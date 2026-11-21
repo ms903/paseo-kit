@@ -38,10 +38,12 @@ function msg(n: number, v: Buffer | string) {
 }
 const seconds = Date.parse("2026-11-15T23:30:00Z") / 1000;
 
-test("matches Antigravity persistence to the conversation row for its composer pill", async () => {
+test("matches legacy and ACP Antigravity persistence to the composer pill's conversation", async () => {
   const conversationId = "b966b16a-caf4-448a-bb24-0e34956022b0";
   const persisted = { version: 1, data: { conversationId } };
   const agent = { provider: "antigravity", sessionId: `plugin:${JSON.stringify(persisted)}` };
+  const acpPersistence = { version: 1, data: { sessionId: conversationId } };
+  const acpAgent = { provider: "antigravity", sessionId: `plugin:${JSON.stringify(acpPersistence)}` };
   const session = {
     id: conversationId,
     agent: "antigravity",
@@ -54,6 +56,8 @@ test("matches Antigravity persistence to the conversation row for its composer p
   const persistence = new Map([
     ["with-metadata", { ...agent, metadata: { pluginProviderPersistence: persisted } }],
     ["encoded-only", agent],
+    ["acp-with-metadata", { ...acpAgent, sessionId: "plugin:{", metadata: { pluginProviderPersistence: acpPersistence } }],
+    ["acp-encoded-only", acpAgent],
     ["native", { ...agent, nativeHandle: conversationId }],
     ["malformed", { ...agent, sessionId: "plugin:{" }],
     ["codex", { provider: "codex", sessionId: "thread" }],
@@ -64,11 +68,12 @@ test("matches Antigravity persistence to the conversation row for its composer p
   const matcher = createSessionMatcher({ sessions: async () => [other, codex, session] });
 
   const { sessions } = await matcher.resolve({ agentIds: [...persistence.keys()] }, paseo);
-  for (const [index, agentId] of ["with-metadata", "encoded-only", "native"].entries()) {
-    assert.deepEqual(sessions[index], { status: "matched", agentId, providerSessionId: conversationId, session });
+  const matches = new Map(sessions.map((match) => [match.agentId, match]));
+  for (const agentId of ["with-metadata", "encoded-only", "acp-with-metadata", "acp-encoded-only", "native"]) {
+    assert.deepEqual(matches.get(agentId), { status: "matched", agentId, providerSessionId: conversationId, session });
   }
-  assert.deepEqual(sessions[3], { status: "unknown", agentId: "malformed" });
-  assert.deepEqual(sessions[4], { status: "matched", agentId: "codex", providerSessionId: "thread", session: codex });
+  assert.deepEqual(matches.get("malformed"), { status: "unknown", agentId: "malformed" });
+  assert.deepEqual(matches.get("codex"), { status: "matched", agentId: "codex", providerSessionId: "thread", session: codex });
 });
 
 function generation(
@@ -97,9 +102,9 @@ function generation(
     ]),
   );
 }
-async function fixture() {
+async function fixture(store = "antigravity-cli") {
   const root = await mkdtemp(path.join(os.tmpdir(), "paseo-ag-"));
-  const dir = path.join(root, "antigravity-cli", "conversations");
+  const dir = path.join(root, store, "conversations");
   await mkdir(dir, { recursive: true });
   const file = path.join(dir, "session-one.db");
   const db = new DatabaseSync(file);
@@ -119,8 +124,8 @@ async function fixture() {
   };
 }
 
-test("reads live WAL without changing source files and refreshes after an append", async () => {
-  const f = await fixture();
+test("reads live ACP usage from WAL without changing source files and refreshes after an append", async () => {
+  const f = await fixture("antigravity-acp");
   try {
     f.insert(1, generation());
     const before = await stat(f.file);

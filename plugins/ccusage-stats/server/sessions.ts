@@ -17,15 +17,21 @@ interface CachedSessionId {
   at: number;
 }
 
-const antigravityPersistence = z.object({
-  version: z.literal(1),
-  data: z.object({ conversationId: z.string().min(1) }),
-});
+const antigravityPersistence = z
+  .object({
+    version: z.literal(1),
+    // ACP stores sessionId. Saved agents from the stream-json provider use conversationId.
+    data: z.union([
+      z.object({ sessionId: z.string().min(1) }),
+      z.object({ conversationId: z.string().min(1) }),
+    ]),
+  })
+  .transform(({ data }) => ("sessionId" in data ? data.sessionId : data.conversationId));
 const PLUGIN_SESSION_PREFIX = "plugin:";
 
 function antigravityConversationId(sessionId: string, metadata: unknown): string | null {
   const saved = antigravityPersistence.safeParse(metadata);
-  if (saved.success) return saved.data.data.conversationId;
+  if (saved.success) return saved.data;
   if (!sessionId.startsWith(PLUGIN_SESSION_PREFIX)) return sessionId || null;
 
   // Paseo also serializes the provider persistence in the session id.
@@ -33,7 +39,7 @@ function antigravityConversationId(sessionId: string, metadata: unknown): string
     const parsed = antigravityPersistence.safeParse(
       JSON.parse(sessionId.slice(PLUGIN_SESSION_PREFIX.length)),
     );
-    return parsed.success ? parsed.data.data.conversationId : null;
+    return parsed.success ? parsed.data : null;
   } catch {
     return null;
   }
