@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { z } from "zod";
 import type { UsageStore } from "./usage-store";
-import type { RawReport, RawRow } from "./ccusage";
+import type { RawModel, RawReport, RawRow } from "./ccusage";
 import { addModelUsage, addTotals, emptyRow, weekOf } from "./usage-rows";
 import { ANTIGRAVITY_READER } from "./antigravity-reader";
 import {
@@ -25,9 +25,15 @@ const conversationSchema = z.object({
 type Totals = z.infer<typeof conversationSchema>;
 type Conversation = Totals & { file: string; error?: string };
 const MAX_DATABASES = 5000;
+const MAX_OPENED_SESSIONS = 32;
+
+function geminiDirectory() {
+  return process.env.GEMINI_DIR || path.join(os.homedir(), ".gemini");
+}
 
 export async function conversationFiles(
   root: string,
+  sessionId?: string,
 ): Promise<Map<string, { file: string; signature: string; size: number }>> {
   const found = new Map<
     string,
@@ -47,6 +53,11 @@ export async function conversationFiles(
     )
       continue;
     const dir = path.join(root, store.name, "conversations");
+    if (sessionId) {
+      // Check the known filename without enumerating the store's conversations.
+      await inspect(path.join(dir, sessionId + ".db"), sessionId);
+      continue;
+    }
     const handle = await fs.opendir(dir).catch(() => null);
     if (!handle) continue;
     try {
@@ -54,28 +65,7 @@ export async function conversationFiles(
         const entry = await handle.read();
         if (!entry) break;
         if (!entry.name.endsWith(".db") || !entry.isFile()) continue;
-        const file = path.join(dir, entry.name);
-        const [stat, wal] = await Promise.all([
-          fs.stat(file),
-          fs.stat(`${file}-wal`).catch(() => null),
-        ]);
-        const id = entry.name.slice(0, -3);
-        const candidate = {
-          file,
-          signature: JSON.stringify([
-            stat.size,
-            stat.mtimeMs,
-            stat.ctimeMs,
-            stat.ino,
-            wal?.size,
-            wal?.mtimeMs,
-            wal?.ctimeMs,
-            wal?.ino,
-          ]),
-          size: stat.size + (wal?.size ?? 0),
-        };
-        if (!found.has(id) || found.get(id)!.size < candidate.size)
-          found.set(id, candidate);
+        await inspect(path.join(dir, entry.name), entry.name.slice(0, -3));
         if (found.size > MAX_DATABASES)
           throw new Error("Antigravity conversation limit exceeded");
       }
@@ -84,6 +74,26 @@ export async function conversationFiles(
     }
   }
   return found;
+
+  async function inspect(file: string, id: string) {
+    const [stat, wal] = await Promise.all([
+      fs.lstat(file).catch((error: NodeJS.ErrnoException) => {
+        if (error.code !== "ENOENT") throw error;
+        return null;
+      }),
+      fs.stat(file + "-wal").catch(() => null),
+    ]);
+    if (!stat?.isFile()) return;
+    const candidate = {
+      file,
+      signature: JSON.stringify([
+        stat.size, stat.mtimeMs, stat.ctimeMs, stat.ino,
+        wal?.size, wal?.mtimeMs, wal?.ctimeMs, wal?.ino,
+      ]),
+      size: stat.size + (wal?.size ?? 0),
+    };
+    if (!found.has(id) || found.get(id)!.size < candidate.size) found.set(id, candidate);
+  }
 }
 
 export function readConversations(
@@ -121,22 +131,19 @@ export function readConversations(
 
 export function createAntigravityReport(store?: UsageStore, readBatch = readConversations) {
   const cached = new Map<string, { signature: string; totals: Totals }>();
+  const opened = new Map<string, { signature: string; totals: Totals }>();
   const index = store?.fileIndex("antigravity", conversationSchema);
   let previous: { catalog: PriceCatalog; timezone: string; report: RawReport } | undefined;
 
-  return async (
+  async function report(
     timezone: string, signal?: AbortSignal,
-    root = process.env.GEMINI_DIR || path.join(os.homedir(), ".gemini"),
+    root = geminiDirectory(),
     prices: PriceCatalog | Promise<PriceCatalog> = EMPTY_CATALOG,
-  ): Promise<RawReport> => {
+  ): Promise<RawReport> {
     const files = await conversationFiles(root);
     const catalog = files.size ? await prices : EMPTY_CATALOG;
-    const bounds = new Set<number>(BUILTIN_CONTEXT_BOUNDS);
-    for (const [name, price] of catalog) {
-      if (/^(?:gemini-|claude-)/.test(name)) for (const tier of price.context) bounds.add(tier.above);
-    }
-    const contextBounds = [...bounds].sort((a, b) => a - b);
-    const prefix = timezone + ":" + contextBounds.join(",") + ":";
+    const contextBounds = pricingBounds(catalog);
+    const prefix = cachePrefix(timezone, contextBounds);
     const paths = new Map([...files.values()].map((entry) => [entry.file, prefix + entry.signature]));
     for (const file of cached.keys()) {
       if (!paths.has(file)) { cached.delete(file); previous = undefined; }
@@ -145,7 +152,12 @@ export function createAntigravityReport(store?: UsageStore, readBatch = readConv
     for (const [file, signature] of paths) {
       if (cached.get(file)?.signature === signature) continue;
       previous = undefined;
-      const totals = await index?.get(file, signature);
+      const local = opened.get(file);
+      const totals = local?.signature === signature ? local.totals : await index?.get(file, signature);
+      if (local?.signature === signature) {
+        opened.delete(file);
+        await index?.set(file, signature, local.totals);
+      }
       if (totals) cached.set(file, { signature, totals });
       else changed.push(file);
     }
@@ -170,10 +182,73 @@ export function createAntigravityReport(store?: UsageStore, readBatch = readConv
     const report = summarize(files, cached, catalog);
     previous = { timezone, catalog, report };
     return report;
-  };
+  }
+
+  return Object.assign(report, {
+    async readSession(
+      id: string, timezone: string, signal: AbortSignal,
+      root = geminiDirectory(), catalog = EMPTY_CATALOG,
+    ) {
+      if (!/^[a-z0-9_-]{1,128}$/i.test(id)) return;
+      const entry = (await conversationFiles(root, id)).get(id);
+      if (signal.aborted) throw new Error("Session usage read timed out");
+      if (!entry) return;
+      const bounds = pricingBounds(catalog);
+      const signature = cachePrefix(timezone, bounds) + entry.signature;
+      const local = opened.get(entry.file);
+      const indexed = cached.get(entry.file);
+      let totals = indexed?.signature === signature ? indexed.totals
+        : local?.signature === signature ? local.totals : await index?.get(entry.file, signature);
+      if (!totals) {
+        const [result] = await readBatch([entry.file], timezone, signal, bounds);
+        if (!result || result.error) throw new Error("Could not read the Antigravity session");
+        totals = result;
+        opened.delete(entry.file);
+        opened.set(entry.file, { signature, totals });
+        if (opened.size > MAX_OPENED_SESSIONS) opened.delete(opened.keys().next().value!);
+      }
+      return sessionRow(id, totals, catalog);
+    },
+  });
 }
 
 export const antigravityReport = createAntigravityReport();
+
+function pricingBounds(catalog: PriceCatalog) {
+  const bounds = new Set<number>(BUILTIN_CONTEXT_BOUNDS);
+  for (const [name, price] of catalog) {
+    if (/^(?:gemini-|claude-)/.test(name)) for (const tier of price.context) bounds.add(tier.above);
+  }
+  return [...bounds].sort((a, b) => a - b);
+}
+
+function cachePrefix(timezone: string, bounds: readonly number[]) {
+  return timezone + ":" + bounds.join(",") + ":";
+}
+
+function sessionRow(
+  id: string, conversation: Totals | undefined, catalog: PriceCatalog,
+  byDay?: (day: string, model: RawModel) => void,
+): RawRow | undefined {
+  if (!conversation?.buckets.length) return;
+  const total = emptyRow(id, "antigravity");
+  total.metadata = { lastActivity: new Date(conversation.lastActivity).toISOString() };
+  for (const bucket of conversation.buckets) {
+    const name = modelName(bucket.modelId, bucket.label, catalog);
+    const model: RawModel = {
+      modelName: name,
+      inputTokens: bucket.inputTokens,
+      outputTokens: bucket.outputTokens,
+      cacheCreationTokens: 0,
+      cacheReadTokens: bucket.cacheReadTokens,
+      cost: generationCost(name, bucket.inputTokens, bucket.outputTokens, bucket.cacheReadTokens,
+        bucket.contextSize, bucket.priceDay, catalog),
+    };
+    addModelUsage(total, model);
+    byDay?.(bucket.day, model);
+  }
+  return total;
+}
 
 function summarize(
   files: Awaited<ReturnType<typeof conversationFiles>>,
@@ -187,35 +262,11 @@ function summarize(
   };
   const session: RawRow[] = [];
   for (const [id, entry] of files) {
-    const conversation = cached.get(entry.file)?.totals;
-    if (!conversation?.buckets.length) continue;
-    const total = emptyRow(id, "antigravity");
-    total.metadata = {
-      lastActivity: new Date(conversation.lastActivity).toISOString(),
-    };
-    for (const bucket of conversation.buckets) {
-      const name = modelName(bucket.modelId, bucket.label, catalog);
-      const model = {
-        modelName: name,
-        inputTokens: bucket.inputTokens,
-        outputTokens: bucket.outputTokens,
-        cacheCreationTokens: 0,
-        cacheReadTokens: bucket.cacheReadTokens,
-        cost: generationCost(
-          name,
-          bucket.inputTokens,
-          bucket.outputTokens,
-          bucket.cacheReadTokens,
-          bucket.contextSize,
-          bucket.priceDay,
-          catalog,
-        ),
-      };
-      addModelUsage(total, model);
+    const total = sessionRow(id, cached.get(entry.file)?.totals, catalog, (day, model) => {
       const keys = {
-        daily: bucket.day,
-        weekly: weekOf(bucket.day),
-        monthly: bucket.day.slice(0, 7),
+        daily: day,
+        weekly: weekOf(day),
+        monthly: day.slice(0, 7),
       };
       for (const kind of ["daily", "weekly", "monthly"] as const) {
         const key = keys[kind];
@@ -223,8 +274,8 @@ function summarize(
         addModelUsage(row, model);
         periods[kind].set(key, row);
       }
-    }
-    session.push(total);
+    });
+    if (total) session.push(total);
   }
   return {
     daily: [...periods.daily.values()],

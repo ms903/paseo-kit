@@ -21,7 +21,7 @@ import {
   type RawRow,
 } from "./ccusage";
 import { createReportPricer, type ReportPrices } from "./codex-prices";
-import { createPriceCatalog, type PriceCatalog } from "./price-catalog";
+import { createPriceCatalog, pricingDeadline, type PriceCatalog } from "./price-catalog";
 import { createUsageHistory, oldestReportDay, REPORT_MONTHS, type RecentSessions, type RefreshMode } from "./usage-history";
 import { emptyRow, rollupDays } from "./usage-rows";
 import { createUsageStore } from "./usage-store";
@@ -175,7 +175,8 @@ export interface ReportCache {
   read(refresh?: boolean): Promise<ReportResponse>;
   read(refresh: boolean | undefined, knownRevision: string | undefined): Promise<UsageRead>;
   updatePrices(): Promise<ReportResponse>;
-  sessions(): Promise<SessionUsage[]>;
+  sessions(refreshReport?: boolean): Promise<SessionUsage[]>;
+  refreshSession(sessionId: string): Promise<SessionUsage | undefined>;
   listSessions(input: SessionListInput): Promise<SessionListResult>;
   stop(): void;
 }
@@ -199,6 +200,7 @@ export function createReportCache(scan = runCcusage, cacheDirectory?: string): R
   let version = 0;
   let rendered: { history: string; antigravity: RawReport; catalog: PriceCatalog } | undefined;
   let startup: Promise<void> | undefined;
+  let refreshAfterRestore = false;
   let restored = false;
   let running = false;
   let nextRefreshAt = 0;
@@ -358,8 +360,9 @@ export function createReportCache(scan = runCcusage, cacheDirectory?: string): R
     void refresh(mode);
   }
 
-  async function current() {
+  async function current(refreshReport = true) {
     // Give a local cache hit one short read on the first request. Log scans never hold the RPC.
+    if (refreshReport) refreshAfterRestore = true;
     startup ??= new Promise<void>((resolve) => {
       const timer = setTimeout(resolve, 100);
       void store.readReport().then((saved) => {
@@ -375,12 +378,12 @@ export function createReportCache(scan = runCcusage, cacheDirectory?: string): R
       }).finally(() => {
         clearTimeout(timer);
         restored = true;
-        schedule();
+        if (refreshAfterRestore) schedule();
         resolve();
       });
     });
     await startup;
-    schedule();
+    if (refreshReport) schedule();
   }
 
   function read(force?: boolean): Promise<ReportResponse>;
@@ -412,9 +415,14 @@ export function createReportCache(scan = runCcusage, cacheDirectory?: string): R
       })().finally(() => { priceUpdate = null; });
       return priceUpdate;
     },
-    async sessions() {
-      await current();
+    async sessions(refreshReport) {
+      await current(refreshReport);
       return snapshot?.sessions ?? [];
+    },
+    async refreshSession(sessionId) {
+      const budget = pricingDeadline(signal, 10_000);
+      const row = await readAntigravity.readSession(sessionId, timezone, budget, undefined, await priceCatalog.read());
+      return row && sessionOf(row);
     },
     async listSessions(input) {
       browsingSessions = true;

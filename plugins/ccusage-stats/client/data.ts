@@ -1,9 +1,9 @@
 import type { PluginTheme } from "@getpaseo/plugin";
 import { useRpc } from "@getpaseo/plugin/client";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   EMPTY_USAGE,
-  sessionUsageRpc,
+  sessionDetailRpc,
   usageReportRpc,
   type AgentUsage,
   type Usage,
@@ -12,7 +12,6 @@ import {
 } from "../shared/usage";
 
 const REPORT_REFRESH_MS = 2 * 60_000;
-const SESSION_REFRESH_MS = 60_000;
 export const USAGE_REPORT_KEY = ["usage-report"] as const;
 export const SESSION_USAGE_KEY = ["session-usage"] as const;
 
@@ -64,15 +63,32 @@ export function useUsageReport(hostId: string) {
 }
 
 export function useSessionUsage(hostId: string, agentId: string) {
-  const getSessions = useRpc(sessionUsageRpc);
-  return useQuery({
-    queryKey: [...SESSION_USAGE_KEY, hostId, agentId],
-    queryFn: async () => {
-      const { sessions } = await getSessions({ agentIds: [agentId] });
-      return sessions[0] ?? { status: "unknown" as const, agentId };
-    },
-    refetchInterval: SESSION_REFRESH_MS,
+  const read = useRpc(sessionDetailRpc);
+  const client = useQueryClient();
+  const queryKey = [...SESSION_USAGE_KEY, hostId, "detail", agentId];
+  const query = useQuery({
+    queryKey,
+    queryFn: () => read({ agentId }),
+    enabled: !!agentId,
+    retry: false,
+    refetchOnMount: "always",
+    refetchOnReconnect: false,
+    refetchOnWindowFocus: false,
   });
+  const refresh = useMutation({
+    mutationFn: () => read({ agentId, refresh: true }),
+    retry: false,
+    onSuccess: async (data) => {
+      await client.cancelQueries({ queryKey, exact: true });
+      client.setQueryData(queryKey, data);
+    },
+  });
+  return { query, refresh };
+}
+
+export function cacheHitRate(usage: Usage): number | null {
+  const prompt = usage.inputTokens + usage.cacheCreationTokens + usage.cacheReadTokens;
+  return prompt > 0 ? usage.cacheReadTokens / prompt : null;
 }
 
 // Days before today that define a typical day for the sidebar meter: four weeks, so weekly rhythms

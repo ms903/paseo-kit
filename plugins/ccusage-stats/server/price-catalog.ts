@@ -35,13 +35,13 @@ export interface ModelPrice {
 export type PriceCatalog = ReadonlyMap<string, ModelPrice>;
 export const EMPTY_CATALOG: PriceCatalog = new Map();
 
-export function pricingDeadline(signal: AbortSignal): AbortSignal {
+export function pricingDeadline(signal: AbortSignal, timeout = 5_000): AbortSignal {
   // The plugin SDK's React Native types omit these server-side Node methods.
   const nodeSignal = AbortSignal as typeof AbortSignal & {
     any(signals: AbortSignal[]): AbortSignal;
     timeout(ms: number): AbortSignal;
   };
-  return nodeSignal.any([signal, nodeSignal.timeout(5_000)]);
+  return nodeSignal.any([signal, nodeSignal.timeout(timeout)]);
 }
 
 export interface TokenCounts {

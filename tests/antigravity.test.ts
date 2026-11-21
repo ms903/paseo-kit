@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { DatabaseSync } from "node:sqlite";
-import { mkdtemp, mkdir, stat, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, stat, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import {
@@ -17,6 +17,7 @@ import {
 import { parsePriceCatalog } from "../plugins/ccusage-stats/server/price-catalog";
 import { createUsageStore } from "../plugins/ccusage-stats/server/usage-store";
 import { createSessionMatcher } from "../plugins/ccusage-stats/server/sessions";
+import { createReportCache } from "../plugins/ccusage-stats/server/report";
 import { EMPTY_USAGE } from "../plugins/ccusage-stats/shared/usage";
 function vi(value: number): Buffer {
   const out: number[] = [];
@@ -152,6 +153,95 @@ test("reads live ACP usage from WAL without changing source files and refreshes 
   } finally {
     await f.cleanup();
   }
+});
+
+test("only refreshes the open Antigravity conversation and reuses unchanged SQLite and WAL data", async () => {
+  const f = await fixture("antigravity-acp");
+  const signal = new AbortController().signal;
+  const reads: string[][] = [];
+  const report = createAntigravityReport(undefined, (...args) => {
+    reads.push(args[0]);
+    return readConversations(...args);
+  });
+  try {
+    await writeFile(path.join(path.dirname(f.file), "unrelated.db"), "invalid SQLite");
+    f.insert(1, generation());
+    const initial = await report.readSession("session-one", "UTC", signal, f.root);
+    assert.equal(initial?.totalTokens, 360);
+    assert.equal(initial?.cacheReadTokens, 50);
+    assert.deepEqual(await report.readSession("session-one", "UTC", signal, f.root), initial);
+    assert.deepEqual(reads, [[f.file]]);
+
+    f.insert(2, generation(200, 10, 50, seconds + 10));
+    const refreshed = await report.readSession("session-one", "UTC", signal, f.root);
+    assert.equal(refreshed?.totalTokens, 720);
+    assert.equal(refreshed?.cacheReadTokens, 100);
+    assert.deepEqual(reads, [[f.file], [f.file]]);
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("composer details use cached totals, read live context, and coalesce manual session refreshes", async (t) => {
+  const f = await fixture("antigravity-acp");
+  const original = process.env.GEMINI_DIR;
+  process.env.GEMINI_DIR = f.root;
+  t.after(async () => {
+    if (original === undefined) delete process.env.GEMINI_DIR;
+    else process.env.GEMINI_DIR = original;
+    await f.cleanup();
+  });
+  let reportScans = 0;
+  const cache = createReportCache(async () => {
+    reportScans++;
+    return [];
+  }, path.join(f.root, "cache"));
+  t.after(() => cache.stop());
+  const manualReads: string[] = [];
+  const read = cache.refreshSession;
+  cache.refreshSession = async (id) => {
+    manualReads.push(id);
+    return read(id);
+  };
+
+  let used = 57_200;
+  const paseo = {
+    agents: {
+      ref: () => ({
+        refresh: async () => ({
+          agent: {
+            persistence: {
+              provider: "antigravity",
+              sessionId: 'plugin:{"version":1,"data":{"sessionId":"session-one"}}',
+            },
+            lastUsage: { contextWindowUsedTokens: used, contextWindowMaxTokens: 512_000 },
+          },
+        }),
+      }),
+    },
+  } as Parameters<ReturnType<typeof createSessionMatcher>["detail"]>[1];
+  const matcher = createSessionMatcher(cache);
+  const input = { agentId: "paseo-agent" };
+  f.insert(1, generation());
+
+  const opened = await matcher.detail(input, paseo);
+  assert.equal(opened.match.status, "pending");
+  assert.deepEqual(opened.context, { used: 57_200, limit: 512_000 });
+  assert.deepEqual(manualReads, []);
+  assert.equal(reportScans, 0);
+
+  used = 60_100;
+  const manual = () => matcher.detail({ ...input, refresh: true }, paseo);
+  const [first, concurrent] = await Promise.all([manual(), manual()]);
+  assert.deepEqual(first.match, concurrent.match);
+  assert.equal(first.match.status, "matched");
+  assert.equal(first.match.session.usage.totalTokens, 360);
+  assert.deepEqual(first.context, { used: 60_100, limit: 512_000 });
+  assert.ok(first.usageCheckedAt);
+  assert.deepEqual(manualReads, ["session-one"]);
+  const { sessions } = await matcher.resolve({ agentIds: [input.agentId] }, paseo);
+  assert.deepEqual(sessions, [first.match]);
+  assert.equal(reportScans, 0);
 });
 
 test("a restored Antigravity index opens only databases whose contents or WAL changed", async () => {

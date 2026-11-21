@@ -111,7 +111,10 @@ const sessionMatchSchema = z.discriminatedUnion("status", [
     session: sessionSchema,
   }),
   /** The provider session exists but ccusage has not recorded usage for it yet. */
-  z.object({ status: z.literal("pending"), agentId: z.string(), providerSessionId: z.string() }),
+  z.object({
+    status: z.literal("pending"), agentId: z.string(), providerSessionId: z.string(),
+    canRefresh: z.literal(true).optional(),
+  }),
   /** Paseo has no provider session id for the agent (never started, or not persistable). */
   z.object({ status: z.literal("unknown"), agentId: z.string() }),
 ]);
@@ -120,6 +123,20 @@ export const sessionUsageRpc = defineRpc({
   name: "usage.sessions",
   input: z.object({ agentIds: z.array(z.string()).max(200) }),
   output: z.object({ generatedAt: z.number(), sessions: z.array(sessionMatchSchema) }),
+});
+
+export const sessionDetailRpc = defineRpc({
+  name: "usage.session.detail",
+  input: z.object({ agentId: z.string().min(1), refresh: z.boolean().optional() }),
+  output: z.object({
+    match: sessionMatchSchema,
+    context: z.object({
+      used: z.int().nonnegative().optional(),
+      limit: z.int().positive().optional(),
+    }).optional(),
+    checkedAt: z.number(),
+    usageCheckedAt: z.number().optional(),
+  }),
 });
 
 export const SESSION_PAGE_SIZE = 12;

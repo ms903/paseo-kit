@@ -8,7 +8,7 @@ import {
 } from "react-native";
 import { updatePricesRpc, type UsagePeriod, type UsageView } from "../shared/usage";
 import { Legend, PERIOD_OPTIONS, PeriodBars, Segmented } from "./charts";
-import { SESSION_USAGE_KEY, USAGE_REPORT_KEY, useUsageReport, type UsageReport } from "./data";
+import { cacheHitRate, SESSION_USAGE_KEY, USAGE_REPORT_KEY, useUsageReport, type UsageReport } from "./data";
 import {
   formatCost, formatPercent, formatPeriodLong, formatPeriodRange, formatTokens, periodDateBounds, reportTimeFormatter,
 } from "./format";
@@ -180,10 +180,8 @@ function Body({
       setPickedKey(null);
     }
   };
-  const prompt = period
-    ? period.usage.inputTokens + period.usage.cacheCreationTokens + period.usage.cacheReadTokens
-    : 0;
-  const cacheHit = period && prompt > 0 ? formatPercent(period.usage.cacheReadTokens / prompt) : "—";
+  const hitRate = period ? cacheHitRate(period.usage) : null;
+  const cacheHit = hitRate === null ? "—" : formatPercent(hitRate);
   const modelCount = period ? new Set(period.agents.flatMap((agent) => agent.models.map((model) => model.model))).size : 0;
   const columnStyle: ViewStyle | undefined = split ? { flex: 1, minWidth: 0 } : undefined;
   const refreshClock = useMemo(() => reportTimeFormatter(timezone, true), [timezone]);
