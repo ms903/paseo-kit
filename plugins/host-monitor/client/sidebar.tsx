@@ -9,15 +9,17 @@ import {
   View,
   type LayoutChangeEvent,
   type PressableStateCallbackType,
+  type TextStyle,
+  type ViewStyle,
 } from "react-native";
 import type { GpuUsage, hostStatsRpc } from "../shared/stats";
 import { formatBytes, formatCompactRate, formatPercent, formatRate, formatUptime, gpuSummary } from "./format";
 import { GpuSection } from "./gpus";
 import {
   Meter,
+  MonitorCard,
   Sparkline,
   diskPercent,
-  loadColor,
   memoryPercent,
   memorySeverity,
   percentSeverity,
@@ -308,154 +310,141 @@ export function HostStatusItem({ theme, host, openPopover }: PluginSidebarItemPr
   );
 }
 
-interface PreviewRowProps {
+const summaryCard: ViewStyle = { flexBasis: 112, flexGrow: 1, flexShrink: 1 };
+const reading: TextStyle = { fontWeight: "600", fontVariant: ["tabular-nums"] };
+
+function ResourceTrend({ theme, icon, title, percent, detail, severity, values }: {
   theme: PluginTheme;
   icon: string;
-  label: string;
-  value: string;
-  color: string;
+  title: string;
+  percent: number;
+  detail: string;
+  severity: Severity;
   values: readonly number[];
-  /** A muted line under the label. */
-  detail?: string;
+}) {
+  const normal = severity === "normal";
+  const color = normal ? theme.colors.accent : severityColor(theme, severity);
+  return (
+    <MonitorCard theme={theme} icon={icon} title={title} style={summaryCard}>
+      <View style={{ flexGrow: 1, gap: 2 }}>
+        <Text style={[reading, { fontSize: 22, lineHeight: 25, color: normal ? theme.colors.foreground : color }]}>
+          {formatPercent(percent)}
+        </Text>
+        <Text style={{ color: theme.colors.foregroundMuted, fontSize: 11 }}>{detail}</Text>
+      </View>
+      <Sparkline values={values} color={color} height={17} />
+    </MonitorCard>
+  );
 }
 
-function PreviewRow({ theme, icon, label, value, color, values, detail }: PreviewRowProps) {
+/** macOS also reports reclaimable files and pressure. */
+function memoryDetail(memory: HostStats["memory"]): string {
+  const parts = [`${formatBytes(memory.usedBytes)} / ${formatBytes(memory.totalBytes)}`];
+  if (memory.cachedBytes !== null) parts.push(`Cached files ${formatBytes(memory.cachedBytes)}`);
+  if (memory.pressure !== null) parts.push(`Pressure ${memory.pressure}`);
+  return parts.join(" · ");
+}
+
+function NetworkSection({ theme, current, history }: {
+  theme: PluginTheme;
+  current: HostStats["current"];
+  history: HostStats["history"];
+}) {
+  const rates = [
+    { label: "Download", icon: "ArrowDown", value: current.rxBytesPerSec,
+      color: theme.colors.accent, values: scaleToPeak(history, (sample) => sample.rxBytesPerSec) },
+    { label: "Upload", icon: "ArrowUp", value: current.txBytesPerSec,
+      color: theme.colors.foregroundMuted, values: scaleToPeak(history, (sample) => sample.txBytesPerSec) },
+  ];
   return (
-    <View style={{ gap: 4 }}>
-      <View style={{ flexDirection: "row", alignItems: "center", gap: ICON_GAP }}>
-        <Icon name={icon} size={ICON_SIZE} color={theme.colors.foregroundMuted} />
-        <Text style={{ flex: 1, color: theme.colors.foregroundMuted, fontSize: FONT_SIZE }}>
-          {label}
-        </Text>
-        <Text
-          style={{ color: theme.colors.foreground, fontSize: FONT_SIZE, fontVariant: ["tabular-nums"] }}
-        >
-          {value}
-        </Text>
+    <MonitorCard theme={theme} icon="ArrowDownUp" title="Network">
+      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 7 }}>
+        {rates.map(({ label, icon, value, color, values }) => (
+          <View key={label} style={[summaryCard, {
+            minWidth: 0, padding: 7, gap: 4, borderRadius: 7, backgroundColor: theme.colors.surface0,
+          }]}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+              <Icon name={icon} size={12} color={color} />
+              <Text style={{ color: theme.colors.foregroundMuted, fontSize: 11, flexShrink: 1 }}>{label}</Text>
+            </View>
+            <Text style={[reading, { color: theme.colors.foreground, fontSize: 15 }]}>{formatRate(value)}</Text>
+            <Sparkline values={values} color={color} height={14} />
+          </View>
+        ))}
       </View>
-      {detail ? <Caption theme={theme} text={detail} /> : null}
-      <Sparkline values={values} color={color} height={18} />
+    </MonitorCard>
+  );
+}
+
+function StorageUsage({ theme, percent, total, used, available, mount }: {
+  theme: PluginTheme;
+  percent: number;
+  total: number;
+  used: number;
+  available: number;
+  mount?: string;
+}) {
+  const severity = percentSeverity(percent);
+  const color = severity === "normal" ? theme.colors.foregroundMuted : severityColor(theme, severity);
+  return (
+    <View style={{ gap: 5 }}>
+      <View style={{ flexDirection: "row", alignItems: "baseline", justifyContent: "space-between", gap: 6 }}>
+        <Text style={{
+          flex: 1, minWidth: 0, fontSize: mount === undefined ? 18 : 12,
+          fontWeight: "600", color: theme.colors.foreground,
+        }} numberOfLines={mount === undefined ? undefined : 2} ellipsizeMode="tail">
+          {mount ?? `${formatBytes(available)} available`}
+        </Text>
+        <Text style={[reading, { color, fontSize: 11, minWidth: 65, textAlign: "right" }]}>{formatPercent(percent)} used</Text>
+      </View>
+      <Meter theme={theme} percent={percent} height={mount === undefined ? 6 : 4} />
+      <View style={{ flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between", columnGap: 8, rowGap: 3 }}>
+        <Text style={{ color: theme.colors.foregroundMuted, fontSize: 11 }}>
+          {formatBytes(used)} / {formatBytes(total)}
+        </Text>
+        {mount !== undefined ? (
+          <Text style={{ color: theme.colors.foreground, fontSize: 11 }}>
+            {formatBytes(available)} available
+          </Text>
+        ) : null}
+      </View>
     </View>
   );
-}
-
-function Caption({ theme, text }: { theme: PluginTheme; text: string }) {
-  return (
-    <Text
-      style={{ paddingLeft: ICON_SIZE + ICON_GAP, color: theme.colors.foregroundMuted, fontSize: FONT_SIZE - 1 }}
-    >
-      {text}
-    </Text>
-  );
-}
-
-/** macOS: what the RAM figure leaves out, and the pressure that colors it. */
-function memoryDetail(memory: HostStats["memory"]): string | undefined {
-  const parts: string[] = [];
-  if (memory.cachedBytes !== null) parts.push(`Cached files ${formatBytes(memory.cachedBytes)}`);
-  if (memory.pressure !== null) parts.push(`pressure ${memory.pressure}`);
-  return parts.length > 0 ? parts.join(" · ") : undefined;
 }
 
 function DiskSection({ theme, disks }: { theme: PluginTheme; disks: HostStats["disks"] }) {
   const total = sumDisks(disks);
   return (
-    <View style={{ gap: 6 }}>
-      <View style={{ flexDirection: "row", alignItems: "center", gap: ICON_GAP }}>
-        <Icon name="HardDrive" size={ICON_SIZE} color={theme.colors.foregroundMuted} />
-        <Text style={{ flex: 1, color: theme.colors.foregroundMuted, fontSize: FONT_SIZE }}>
-          Disk · {formatBytes(total.usedBytes)} / {formatBytes(total.totalBytes)}
-        </Text>
-        <Text
-          style={{ color: theme.colors.foreground, fontSize: FONT_SIZE, fontVariant: ["tabular-nums"] }}
-        >
-          {formatPercent(total.percent)}
-        </Text>
-      </View>
-      <Caption theme={theme} text={`${formatBytes(total.availableBytes)} available`} />
-      {/* statfs on an APFS volume counts every volume sharing its container, so say so: Finder and
-          other tools often show the data volume alone. */}
+    <MonitorCard theme={theme} icon="HardDrive" title="Storage">
+      <StorageUsage theme={theme} percent={total.percent} used={total.usedBytes}
+        total={total.totalBytes} available={total.availableBytes} />
       {disks.some((disk) => disk.fsType === "apfs") ? (
-        <Caption theme={theme} text="APFS container: all volumes sharing it" />
+        <Text style={{ color: theme.colors.foregroundMuted, fontSize: 11 }}>APFS container: all volumes sharing it</Text>
       ) : null}
-      {/* A single disk is the total itself: its meter, not a repeat of the same numbers. */}
-      {disks.length === 1 ? <Meter theme={theme} percent={total.percent} height={METER_HEIGHT - 2} /> : null}
-      {disks.length > 1 ? disks.map((disk) => {
-        const percent = diskPercent(disk);
-        return (
-          <View key={disk.mount} style={{ gap: 3, paddingLeft: ICON_SIZE + ICON_GAP }}>
-            <View style={{ flexDirection: "row", alignItems: "center", gap: ICON_GAP }}>
-              <Text
-                numberOfLines={1}
-                ellipsizeMode="middle"
-                style={{ flex: 1, color: theme.colors.foreground, fontSize: FONT_SIZE - 1 }}
-              >
-                {disk.mount}
-              </Text>
-              <Text
-                style={{
-                  color: theme.colors.foregroundMuted,
-                  fontSize: FONT_SIZE - 1,
-                  fontVariant: ["tabular-nums"],
-                }}
-              >
-                {formatPercent(percent)}
-              </Text>
-            </View>
-            <Text style={{ color: theme.colors.foregroundMuted, fontSize: FONT_SIZE - 1 }}>
-              {formatBytes(disk.usedBytes)} / {formatBytes(disk.totalBytes)} · {formatBytes(disk.availableBytes)} available
-            </Text>
-            <Meter theme={theme} percent={percent} height={METER_HEIGHT - 2} />
-          </View>
-        );
-      }) : null}
-    </View>
+      {disks.length > 1 ? disks.map((disk) => (
+        <View key={disk.mount} style={{ borderTopWidth: 1, borderTopColor: theme.colors.border, paddingTop: 8 }}>
+          <StorageUsage theme={theme} mount={disk.mount} percent={diskPercent(disk)} used={disk.usedBytes}
+            total={disk.totalBytes} available={disk.availableBytes} />
+        </View>
+      )) : null}
+    </MonitorCard>
   );
 }
 
 function HostMetrics({ theme, data, gpus }: { theme: PluginTheme; data: HostStats; gpus?: GpuUsage[] }) {
   const { current, history, memory, network, disks } = data;
-
   return (
     <>
-      <PreviewRow
-        theme={theme}
-        icon="Cpu"
-        label={`CPU · ${data.cpuCount} cores`}
-        value={formatPercent(current.cpuPercent)}
-        color={loadColor(theme, current.cpuPercent)}
-        values={history.map((s) => s.cpuPercent)}
-      />
-      <PreviewRow
-        theme={theme}
-        icon="MemoryStick"
-        label={`RAM · ${formatBytes(memory.usedBytes)} / ${formatBytes(memory.totalBytes)}`}
-        value={formatPercent(memoryPercent(memory))}
-        color={severityColor(theme, memorySeverity(memory))}
-        values={history.map((s) => s.memoryPercent)}
-        detail={memoryDetail(memory)}
-      />
+      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+        <ResourceTrend theme={theme} icon="Cpu" title="CPU" percent={current.cpuPercent}
+          detail={`${data.cpuCount} cores`} severity={percentSeverity(current.cpuPercent)}
+          values={history.map((sample) => sample.cpuPercent)} />
+        <ResourceTrend theme={theme} icon="MemoryStick" title="Memory" percent={memoryPercent(memory)}
+          detail={memoryDetail(memory)} severity={memorySeverity(memory)}
+          values={history.map((sample) => sample.memoryPercent)} />
+      </View>
       <GpuSection theme={theme} gpus={gpus} />
-      {network ? (
-        <>
-          <PreviewRow
-            theme={theme}
-            icon="ArrowDown"
-            label="Download"
-            value={formatRate(current.rxBytesPerSec)}
-            color={theme.colors.accent}
-            values={scaleToPeak(history, (s) => s.rxBytesPerSec)}
-          />
-          <PreviewRow
-            theme={theme}
-            icon="ArrowUp"
-            label="Upload"
-            value={formatRate(current.txBytesPerSec)}
-            color={theme.colors.accent}
-            values={scaleToPeak(history, (s) => s.txBytesPerSec)}
-          />
-        </>
-      ) : null}
+      {network ? <NetworkSection theme={theme} current={current} history={history} /> : null}
       {disks.length > 0 ? <DiskSection theme={theme} disks={disks} /> : null}
     </>
   );
@@ -469,13 +458,14 @@ function HostDetails({ theme, host, action }: Pick<PluginHostProps, "theme" | "h
     <>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
         <View style={{ flex: 1, gap: 2 }}>
-          <Text numberOfLines={1} style={{ color: theme.colors.foreground, fontSize: FONT_SIZE + 1 }}>
+          <Text accessibilityRole="header" numberOfLines={1}
+            style={{ color: theme.colors.foreground, fontSize: 16, fontWeight: "600" }}>
             {host.label}
           </Text>
           {data ? (
             <Text style={{ color: theme.colors.foregroundMuted, fontSize: FONT_SIZE - 1 }}>
               {data.hostname !== host.label ? `${data.hostname} · ` : ""}
-              up {formatUptime(data.uptimeSeconds)} · load{" "}
+              Up {formatUptime(data.uptimeSeconds)} · Load avg{" "}
               {data.loadAverage.map((n) => n.toFixed(2)).join(" ")}
             </Text>
           ) : null}
@@ -493,7 +483,10 @@ function HostDetails({ theme, host, action }: Pick<PluginHostProps, "theme" | "h
 
 function HostPopover({ theme, layout, host, openScreen }: PluginPopoverProps) {
   return (
-    <View style={{ gap: 10, padding: layout.compact ? 16 : 12, minWidth: 240, backgroundColor: theme.colors.surface1 }}>
+    <View style={{
+      gap: 10, padding: layout.compact ? 12 : 10, minWidth: layout.compact ? 240 : 264,
+      backgroundColor: theme.colors.surface0,
+    }}>
       <HostDetails
         theme={theme}
         host={host}
@@ -502,7 +495,11 @@ function HostPopover({ theme, layout, host, openScreen }: PluginPopoverProps) {
             accessibilityRole="button"
             accessibilityLabel="Open host monitor details"
             onPress={() => openScreen({ screenId: HOST_MONITOR_SCREEN_ID })}
-            style={{ minHeight: 28, flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 6 }}
+            style={({ pressed }) => ({
+              minHeight: 34, flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 8,
+              borderWidth: 1, borderColor: theme.colors.border, borderRadius: 7,
+              backgroundColor: pressed ? theme.colors.surface2 : theme.colors.surface1,
+            })}
           >
             <Text style={{ color: theme.colors.accent, fontSize: FONT_SIZE }}>Details</Text>
             <Icon name="ChevronRight" size={ICON_SIZE} color={theme.colors.accent} />
@@ -515,17 +512,13 @@ function HostPopover({ theme, layout, host, openScreen }: PluginPopoverProps) {
 
 export function HostMonitorScreen({ theme, layout, host }: PluginScreenProps) {
   return (
-    <ScrollView contentContainerStyle={{ padding: layout.compact ? 16 : 24 }}>
+    <ScrollView style={{ backgroundColor: theme.colors.surface0 }}
+      contentContainerStyle={{ padding: layout.compact ? 12 : 24 }}>
       <View style={{
         alignSelf: "center",
         width: "100%",
         maxWidth: 640,
-        gap: 16,
-        padding: 16,
-        borderRadius: 12,
-        borderWidth: 1,
-        borderColor: theme.colors.border,
-        backgroundColor: theme.colors.surface1,
+        gap: 12,
       }}>
         <HostDetails theme={theme} host={host} />
       </View>
