@@ -6,7 +6,7 @@ import type {
 import { Icon } from "@getpaseo/plugin/client/react-native";
 import { useEffect } from "react";
 import { Pressable, Text, View } from "react-native";
-import { sessionUsageRpc, type SessionMatch } from "../shared/usage";
+import { PARENT_AGENT_LABEL, sessionUsageRpc, type SessionMatch } from "../shared/usage";
 import { cacheHitRate, useSessionUsage } from "./data";
 import { agentLabel, formatAgo, formatCost, formatPercent, formatTokens, shortSessionId } from "./format";
 import { Composition, FONT, ModelRows } from "./summary";
@@ -14,6 +14,7 @@ import { Composition, FONT, ModelRows } from "./summary";
 const PILL_ID = "session-usage";
 const PILL_REFRESH_MS = 60_000;
 const AFTER_TURN_DELAY_MS = 2_000;
+const BATCH_SIZE = 200;
 
 export function SessionUsageContent({ theme, host, layout, onUpdate, ...target }: PluginButtonContentProps & {
   onUpdate(match: SessionMatch): void;
@@ -23,7 +24,8 @@ export function SessionUsageContent({ theme, host, layout, onUpdate, ...target }
   const { data } = query;
   const match = data?.match;
   const session = match?.status === "matched" ? match.session : undefined;
-  const cacheHit = session ? cacheHitRate(session.usage) : null;
+  const usage = session?.usage ?? data?.latestRequest;
+  const cacheHit = usage ? cacheHitRate(usage) : null;
   const { used, limit } = data?.context ?? {};
   const occupied = used !== undefined && limit !== undefined ? used / limit : undefined;
   const context = used !== undefined
@@ -42,7 +44,7 @@ export function SessionUsageContent({ theme, host, layout, onUpdate, ...target }
   return (
     <View style={{ gap: 12, padding: layout.compact ? 4 : 0, minWidth: 260 }}>
       <View style={{ flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
-        <Text style={[muted, { flexGrow: 1 }]}>This session</Text>
+        <Text style={[muted, { flexGrow: 1 }]}>{!session && usage ? "Latest request" : "This session"}</Text>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Refresh session"
@@ -61,15 +63,17 @@ export function SessionUsageContent({ theme, host, layout, onUpdate, ...target }
           </Text>
         </Pressable>
       </View>
-      {session ? (
+      {usage ? (
         <View style={{ flexDirection: "row", alignItems: "baseline", columnGap: 8, flexWrap: "wrap" }}>
           <Text style={{ fontSize: 22, fontWeight: "600", color: theme.colors.foreground, fontVariant: ["tabular-nums"] }}>
-            {formatTokens(session.usage.totalTokens)}
+            {formatTokens(usage.totalTokens)}
           </Text>
-          <Text style={muted}>tokens</Text>
-          <Text style={{ fontSize: FONT.title, color: theme.colors.foreground, fontVariant: ["tabular-nums"] }}>
-            {formatCost(session.usage.cost)}
-          </Text>
+          <Text style={muted}>{session?.recorded ? "recorded tokens" : "tokens"}</Text>
+          {usage.cost !== null ? (
+            <Text style={{ fontSize: FONT.title, color: theme.colors.foreground, fontVariant: ["tabular-nums"] }}>
+              {formatCost(usage.cost)}
+            </Text>
+          ) : null}
         </View>
       ) : null}
       {data ? (
@@ -91,10 +95,10 @@ export function SessionUsageContent({ theme, host, layout, onUpdate, ...target }
           </View>
         </View>
       ) : null}
-      {session ? (
+      {usage ? (
         <>
-          <Composition theme={theme} usage={session.usage} />
-          {session.models.length ? <ModelRows theme={theme} models={session.models} /> : null}
+          <Composition theme={theme} usage={usage} />
+          {session?.models.length ? <ModelRows theme={theme} models={session.models} /> : null}
         </>
       ) : query.isPending && !refresh.isError ? (
         <Text style={muted}>Loading session usage…</Text>
@@ -123,21 +127,22 @@ export function SessionUsageContent({ theme, host, layout, onUpdate, ...target }
   );
 }
 
-function pillLabel(match: SessionMatch | undefined): {
+function pillLabel(match: SessionMatch | undefined, child: boolean): {
   visible: boolean;
   label?: string;
   title?: string;
 } {
-  if (match?.status === "pending" && match.canRefresh) {
-    return { visible: true, label: "Usage", title: "Session token usage" };
+  if (match?.status !== "matched" || match.session.usage.totalTokens <= 0) {
+    return child || (match?.status === "pending" && match.canRefresh)
+      ? { visible: true, label: "Usage", title: "Session token usage" }
+      : { visible: false };
   }
-  if (match?.status !== "matched" || match.session.usage.totalTokens <= 0)
-    return { visible: false };
-  const { usage } = match.session;
+  const { usage, recorded } = match.session;
+  const tokens = formatTokens(usage.totalTokens);
   return {
     visible: true,
-    label: formatTokens(usage.totalTokens),
-    title: `Session usage: ${formatTokens(usage.totalTokens)} tokens, ${formatCost(usage.cost)}`,
+    label: tokens,
+    title: `Session usage · ${tokens} ${recorded ? "recorded tokens" : "tokens"}${usage.cost === null ? "" : " · " + formatCost(usage.cost)}`,
   };
 }
 
@@ -146,27 +151,41 @@ interface AgentLike {
   workspaceId?: string | null;
   status?: string;
   archivedAt?: string | null;
+  labels?: Readonly<Record<string, string>>;
 }
 
-/**
- * A composer pill per agent, shown once the report has recorded usage for its provider session.
- */
 export function contributeSessionPills(client: PluginClientContext): () => void {
   const pills = new Map<string, PluginButtonRegistration>();
-  const statuses = new Map<string, string | undefined>();
+  const agents = new Map<string, AgentLike>();
   const lifetime = new AbortController();
+  let generation = 0;
+  let running = false;
+  let queued = false;
   let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+
+  const updatePill = (match: SessionMatch) => {
+    const agent = agents.get(match.agentId);
+    if (agent) pills.get(match.agentId)?.update(pillLabel(match, !!agent.labels?.[PARENT_AGENT_LABEL]));
+  };
 
   const refresh = async () => {
     const agentIds = [...pills.keys()];
     if (agentIds.length === 0 || lifetime.signal.aborted) return;
+    if (running) { queued = true; return; }
+    running = true;
+    const epoch = generation;
     try {
-      const { sessions } = await client.rpc(sessionUsageRpc, { agentIds: agentIds.slice(0, 200) });
-      if (lifetime.signal.aborted) return;
-      for (const match of sessions) pills.get(match.agentId)?.update(pillLabel(match));
+      for (let start = 0; start < agentIds.length; start += BATCH_SIZE) {
+        const { sessions } = await client.rpc(sessionUsageRpc, { agentIds: agentIds.slice(start, start + BATCH_SIZE) });
+        if (lifetime.signal.aborted || epoch !== generation) return;
+        for (const match of sessions) updatePill(match);
+      }
     } catch (error) {
       if (!lifetime.signal.aborted)
         console.warn("[ccusage-stats] Session usage refresh failed", error);
+    } finally {
+      running = false;
+      if (queued) { queued = false; void refresh(); }
     }
   };
 
@@ -180,15 +199,19 @@ export function contributeSessionPills(client: PluginClientContext): () => void 
 
   const register = (agent: AgentLike) => {
     if (lifetime.signal.aborted || !agent.workspaceId || agent.archivedAt) return false;
-    const previous = statuses.get(agent.id);
-    statuses.set(agent.id, agent.status);
+    const previous = agents.get(agent.id);
+    agents.set(agent.id, agent);
+    const child = !!agent.labels?.[PARENT_AGENT_LABEL];
     if (pills.has(agent.id)) {
       // The provider may have established the session ID during the turn.
-      if (previous === "running" && agent.status !== "running")
+      if (child !== !!previous?.labels?.[PARENT_AGENT_LABEL]) {
+        pills.get(agent.id)?.update(pillLabel(undefined, child));
+        scheduleRefresh(1_000);
+      } else if (previous?.status === "running" && agent.status !== "running") {
         scheduleRefresh(AFTER_TURN_DELAY_MS);
+      }
       return false;
     }
-    const onUpdate = (match: SessionMatch) => pills.get(agent.id)?.update(pillLabel(match));
     pills.set(
       agent.id,
       client.addComposerPill({
@@ -196,10 +219,10 @@ export function contributeSessionPills(client: PluginClientContext): () => void 
         workspaceId: agent.workspaceId,
         agentId: agent.id,
         button: {
-          title: "Session token usage",
           icon: "Coins",
-          visible: false,
-          behavior: { kind: "popover", Content: (props) => <SessionUsageContent {...props} onUpdate={onUpdate} /> },
+          title: "Session token usage",
+          ...pillLabel(undefined, child),
+          behavior: { kind: "popover", Content: (props) => <SessionUsageContent {...props} onUpdate={updatePill} /> },
         },
       }),
     );
@@ -209,28 +232,40 @@ export function contributeSessionPills(client: PluginClientContext): () => void 
   const unregister = (agentId: string) => {
     pills.get(agentId)?.remove();
     pills.delete(agentId);
-    statuses.delete(agentId);
+    agents.delete(agentId);
   };
 
   const removeAll = () => {
     for (const pill of pills.values()) pill.remove();
     pills.clear();
-    statuses.clear();
+    agents.clear();
   };
 
-  // An owned list subscription delivers existing agents, then updates, and a fresh snapshot after a reconnect.
-  void client.paseo.agents
-    .list({ subscribe: {}, signal: lifetime.signal })
-    .then(({ subscription }) => {
+  async function observeAgents() {
+    const sort = [{ key: "created_at" as const, direction: "desc" as const }];
+    let options = { includeBackground: true, signal: lifetime.signal, sort };
+    const { subscription } = await client.paseo.agents.list({ ...options, subscribe: {} }).catch((error) => {
+      if (lifetime.signal.aborted) throw error;
+      // The inclusive selector was introduced after the plugin's minimum Paseo version.
+      options = { ...options, includeBackground: false };
+      return client.paseo.agents.list({ subscribe: {}, signal: options.signal, sort });
+    });
+    let paging: Set<string> | undefined;
+    if (!lifetime.signal.aborted) {
       subscription.subscribe({
-        snapshot: ({ entries }) => {
+        snapshot: ({ entries, pageInfo }) => {
+          const epoch = ++generation;
           removeAll();
           for (const { agent } of entries) register(agent);
-          void refresh();
+          const cursor = pageInfo?.nextCursor;
+          paging = cursor ? new Set() : undefined;
+          if (cursor && paging) void loadMore(cursor, epoch, paging);
+          else void refresh();
         },
         update: (message) => {
           if (message.type !== "agent_update") return;
           const update = message.payload;
+          paging?.add(update.kind === "upsert" ? update.agent.id : update.agentId);
           if (update.kind === "upsert") {
             if (update.agent.archivedAt) unregister(update.agent.id);
             else if (register(update.agent)) scheduleRefresh(1_000);
@@ -239,12 +274,32 @@ export function contributeSessionPills(client: PluginClientContext): () => void 
           unregister(update.agentId);
         },
       });
-      return undefined;
-    })
-    .catch((error) => {
-      if (!lifetime.signal.aborted)
-        console.error("[ccusage-stats] Agent observation failed", error);
-    });
+    }
+
+    async function loadMore(cursor: string | null | undefined, epoch: number, changes: Set<string>) {
+      const visited = new Set<string>();
+      try {
+        while (cursor && !visited.has(cursor) && !lifetime.signal.aborted && epoch === generation) {
+          visited.add(cursor);
+          const page = await client.paseo.agents.list({ ...options, page: { cursor, limit: BATCH_SIZE } });
+          if (lifetime.signal.aborted || epoch !== generation) return;
+          for (const { agent } of page.entries) if (!changes.has(agent.id)) register(agent);
+          cursor = page.pageInfo.nextCursor;
+        }
+      } catch (error) {
+        if (!lifetime.signal.aborted) console.warn("[ccusage-stats] Additional agent page failed", error);
+      } finally {
+        if (epoch === generation) {
+          paging = undefined;
+          void refresh();
+        }
+      }
+    }
+  }
+
+  void observeAgents().catch((error) => {
+    if (!lifetime.signal.aborted) console.error("[ccusage-stats] Agent observation failed", error);
+  });
 
   const interval = setInterval(() => void refresh(), PILL_REFRESH_MS);
 

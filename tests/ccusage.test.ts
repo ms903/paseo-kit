@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -10,7 +10,8 @@ import { createUsageHistory } from "../plugins/ccusage-stats/server/usage-histor
 import { createUsageStore } from "../plugins/ccusage-stats/server/usage-store";
 import { createReportCache, localToday, type ReportCache } from "../plugins/ccusage-stats/server/report";
 import { createSessionList } from "../plugins/ccusage-stats/server/session-list";
-import { SESSION_PAGE_SIZE } from "../plugins/ccusage-stats/shared/usage";
+import { createSessionMatcher } from "../plugins/ccusage-stats/server/sessions";
+import { PARENT_AGENT_LABEL, SESSION_PAGE_SIZE, type SessionUsage } from "../plugins/ccusage-stats/shared/usage";
 
 test("identifies ccusage timeouts, termination signals, and quiet exit codes", () => {
   assert.equal(describeCcusageFailure({ killed: true, signal: "SIGTERM" }, "", "session"), "ccusage session scan timed out after 300 seconds");
@@ -91,6 +92,88 @@ test("resumed sessions retain older model costs and provider-specific lifetime t
   assert.deepEqual(lifetime, qwen);
   assert.deepEqual(pi, older[2]);
   assert.equal(older[0].totalCost, 4);
+});
+
+test("opens an unindexed Paseo Codex child using its own rollout, then uses the priced report when it catches up", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "paseo-child-usage-"));
+  const previous = process.env.CODEX_HOME;
+  process.env.CODEX_HOME = root;
+  t.after(async () => {
+    if (previous === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = previous;
+    await rm(root, { recursive: true, force: true });
+  });
+  const createdAt = "2026-11-24T00:02:00Z";
+  const observedAt = "2026-11-24T00:03:00Z";
+  const prefix = Date.parse(createdAt).toString(16).padStart(12, "0");
+  const id = (suffix: string) => `${prefix.slice(0, 8)}-${prefix.slice(8)}-7000-8000-${suffix.padStart(12, "0")}`;
+  const child = id("1"), parent = id("2"), fork = id("3"), missing = id("4");
+  const dir = path.join(root, "sessions", "2026", "11", "23");
+  await mkdir(dir, { recursive: true });
+  const fileName = (thread: string) => `rollout-2026-11-23T16-02-00-${thread}`;
+  const file = (thread: string) => path.join(dir, fileName(thread) + ".jsonl");
+  const tokenEvent = (input: number, output: number, read: number, at = observedAt) => JSON.stringify({
+    type: "event_msg", timestamp: at,
+    payload: { type: "token_count", info: { total_token_usage: {
+      input_tokens: input, output_tokens: output, cached_input_tokens: read,
+    } } },
+  });
+  for (const thread of [child, parent, fork]) {
+    const meta = JSON.stringify({
+      type: "session_meta", payload: { id: thread, ...(thread === fork ? { forked_from_id: parent } : {}) },
+    });
+    const event = thread === child ? tokenEvent(100, 20, 70) : tokenEvent(9000, 10, 8900);
+    await writeFile(file(thread), meta + "\n" + " ".repeat(560 * 1024) + "\n" + event + "\n");
+  }
+  const indexed: SessionUsage[] = [];
+  const matcher = createSessionMatcher({
+    sessions: async (scan) => { assert.equal(scan, false); return indexed; },
+  });
+  const lookup: Record<string, string> = { child, parent, fork, missing };
+  const paseo = {
+    agents: {
+      ref: (agentId: string) => ({
+        refresh: async () => ({ agent: {
+          createdAt, labels: agentId === "parent" ? {} : { [PARENT_AGENT_LABEL]: "parent" },
+          persistence: { provider: "codex", sessionId: lookup[agentId] },
+          lastUsage: { inputTokens: 42, outputTokens: 8, cachedInputTokens: 30,
+            contextWindowUsedTokens: 50, contextWindowMaxTokens: 475_000 },
+        } }),
+      }),
+    },
+  } as Parameters<ReturnType<typeof createSessionMatcher>["detail"]>[1];
+
+  const request = (agentId: string, refresh = false) => matcher.detail({ agentId, refresh }, paseo);
+  const cached = await matcher.resolve({ agentIds: ["child"] }, paseo);
+  assert.equal(cached.sessions[0].status, "pending");
+  const opened = await request("child");
+  assert.equal(opened.match.status, "matched");
+  assert.equal(opened.match.session.recorded, true);
+  assert.equal(opened.match.session.usage.totalTokens, 120);
+  assert.equal(opened.match.session.usage.cacheReadTokens, 70);
+  assert.deepEqual(opened.context, { used: 50, limit: 475_000 });
+  const fallback = await request("missing");
+  assert.equal(fallback.match.status, "pending");
+  assert.equal(fallback.latestRequest?.totalTokens, 50);
+  const forked = await request("fork");
+  assert.equal(forked.match.status, "pending");
+  assert.equal(forked.latestRequest?.totalTokens, 50);
+  assert.equal((await request("parent")).latestRequest, undefined);
+
+  const now = "2026-11-24T00:04:00Z";
+  await appendFile(file(child), tokenEvent(140, 30, 90, now) + "\n");
+  const updated = await request("child", true);
+  assert.equal(updated.match.status, "matched");
+  assert.equal(updated.match.session.usage.totalTokens, 170);
+  indexed.push({
+    ...updated.match.session, recorded: undefined,
+    id: `2026/11/23/${fileName(child)}`, lastActivity: "2026-11-24T00:04:00.000Z",
+    usage: { ...updated.match.session.usage, cost: 0.012 },
+  });
+  assert.equal((await request("child")).match.status, "matched");
+  const report = await matcher.resolve({ agentIds: ["child"] }, paseo);
+  assert.equal(report.sessions[0].status, "matched");
+  assert.deepEqual(report.sessions[0].session, indexed[0]);
 });
 
 test("groups priced models and agent totals across month and Monday boundaries", () => {

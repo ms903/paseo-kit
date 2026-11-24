@@ -32,7 +32,10 @@ export const sessionSchema = z.object({
   usage: usageSchema,
   models: z.array(modelUsageSchema),
   lastActivity: z.string().nullable(),
+  recorded: z.literal(true).optional(),
 });
+
+export const PARENT_AGENT_LABEL = "paseo.parent-agent-id";
 
 const progressSchema = z.object({
   stage: z.enum(["recentUsage", "recentSessions", "dailyHistory", "sessionHistory", "totals"]),
@@ -130,6 +133,7 @@ export const sessionDetailRpc = defineRpc({
   input: z.object({ agentId: z.string().min(1), refresh: z.boolean().optional() }),
   output: z.object({
     match: sessionMatchSchema,
+    latestRequest: usageSchema.optional(),
     context: z.object({
       used: z.int().nonnegative().optional(),
       limit: z.int().positive().optional(),

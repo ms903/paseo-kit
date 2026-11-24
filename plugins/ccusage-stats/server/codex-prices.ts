@@ -108,7 +108,7 @@ function number(value: unknown): number {
     : 0;
 }
 
-function usageFrom(raw: Record<string, unknown>): TokenCounts {
+export function usageFrom(raw: Record<string, unknown>): TokenCounts {
   return {
     inputTokens: number(raw.input_tokens ?? raw.prompt_tokens ?? raw.input),
     outputTokens: number(
@@ -359,7 +359,7 @@ async function readRollout(
   }
 }
 
-function defaultHomes(): string[] {
+export function codexHomes(): string[] {
   const roots = process.env.CODEX_HOME || path.join(os.homedir(), ".codex");
   return roots
     .split(",")
@@ -367,7 +367,7 @@ function defaultHomes(): string[] {
     .filter(Boolean);
 }
 
-async function rolloutSource(session: string, homes: string[]) {
+export async function rolloutSource(session: string, homes: string[]) {
   const segments = session.split(/[/\\]/);
   if (
     segments.some(
@@ -402,7 +402,7 @@ function periodKey(kind: keyof RawReport, day: string, session: string): string 
 export type ReportPrices = (report: RawReport, sessionsKnownFrom?: string) => void;
 
 /** Reuse the same request-level prices as the calendar grows from recent days to a full year. */
-export function createReportPricer(homes = defaultHomes(), store?: UsageStore, readFile = readRollout) {
+export function createReportPricer(homes = codexHomes(), store?: UsageStore, readFile = readRollout) {
   const index = store?.fileIndex("codex", z.array(bucketSchema));
   const cached = new Map<string, { signature: string; buckets: Bucket[] }>();
 

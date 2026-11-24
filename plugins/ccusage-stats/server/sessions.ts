@@ -1,7 +1,8 @@
 import type { RpcInput, RpcOutput } from "@getpaseo/plugin";
 import type { PluginHandlerContext } from "@getpaseo/plugin/server";
 import { z } from "zod";
-import type { SessionMatch, SessionUsage, sessionDetailRpc, sessionUsageRpc } from "../shared/usage";
+import { PARENT_AGENT_LABEL, type SessionMatch, type SessionUsage, type sessionDetailRpc, type sessionUsageRpc } from "../shared/usage";
+import { createCodexSessionReader } from "./codex-session";
 import type { ReportCache } from "./report";
 
 type PaseoApi = PluginHandlerContext["paseo"];
@@ -16,6 +17,8 @@ interface CachedSessionId {
   /** null: the agent has no provider session yet. */
   sessionId: string | null;
   provider?: string;
+  child?: boolean;
+  createdAt?: string;
   at: number;
 }
 
@@ -63,7 +66,7 @@ function sessionTarget(agent: Agent | undefined): CachedSessionId {
   const sessionId = persistence && provider === "antigravity" && !persistence.nativeHandle
     ? antigravityConversationId(persistence.sessionId, persistence.metadata?.pluginProviderPersistence)
     : persistence?.nativeHandle || persistence?.sessionId || null;
-  return { sessionId, provider, at: Date.now() };
+  return { sessionId, provider, child: !!agent?.labels?.[PARENT_AGENT_LABEL], createdAt: agent?.createdAt, at: Date.now() };
 }
 
 function contextOf(usage: Agent["lastUsage"]) {
@@ -74,10 +77,25 @@ function contextOf(usage: Agent["lastUsage"]) {
   return validUsed === undefined && validLimit === undefined ? undefined : { used: validUsed, limit: validLimit };
 }
 
+function latestCodexRequest(usage: Agent["lastUsage"]) {
+  const input = usage?.inputTokens;
+  const output = usage?.outputTokens;
+  if (typeof input !== "number" || typeof output !== "number" ||
+    !Number.isSafeInteger(input) || !Number.isSafeInteger(output) || input < 0 || output < 0 || !input && !output) return;
+  const cached = usage?.cachedInputTokens;
+  const cacheReadTokens = typeof cached === "number" && Number.isSafeInteger(cached)
+    ? Math.min(Math.max(cached, 0), input) : 0;
+  return {
+    inputTokens: input - cacheReadTokens, outputTokens: output, cacheReadTokens,
+    cacheCreationTokens: 0, totalTokens: input + output, cost: null,
+  };
+}
+
 export function createSessionMatcher(cache: Pick<ReportCache, "sessions"> & Partial<Pick<ReportCache, "refreshSession">>) {
   const sessionIds = new Map<string, CachedSessionId>();
   const updated = new Map<string, { session: SessionUsage; at: number }>();
   const refreshing = new Map<string, Promise<void>>();
+  const readCodex = createCodexSessionReader();
 
   async function providerSession(paseo: PaseoApi, agentId: string): Promise<CachedSessionId> {
     const cached = sessionIds.get(agentId);
@@ -89,24 +107,22 @@ export function createSessionMatcher(cache: Pick<ReportCache, "sessions"> & Part
   }
 
   function remember(agentId: string, entry: CachedSessionId) {
-    for (const [id, entry] of sessionIds) {
-      if (Date.now() - entry.at >= SESSION_ID_TTL_MS) sessionIds.delete(id);
-    }
+    sessionIds.delete(agentId);
     if (sessionIds.size >= MAX_SESSION_IDS) sessionIds.delete(sessionIds.keys().next().value!);
     sessionIds.set(agentId, entry);
     return entry;
   }
 
-  function refreshUsage(id: string, read: ReportCache["refreshSession"]) {
-    let job = refreshing.get(id);
+  function refreshUsage(key: string, read: () => Promise<SessionUsage | undefined>) {
+    let job = refreshing.get(key);
     if (!job) {
-      job = read(id).then((session) => {
+      job = read().then((session) => {
         if (!session) return;
-        updated.delete(id);
-        updated.set(id, { session, at: Date.now() });
+        updated.delete(key);
+        updated.set(key, { session, at: Date.now() });
         if (updated.size > MAX_REFRESHED) updated.delete(updated.keys().next().value!);
-      }).finally(() => { refreshing.delete(id); });
-      refreshing.set(id, job);
+      }).finally(() => { refreshing.delete(key); });
+      refreshing.set(key, job);
     }
     return job;
   }
@@ -118,15 +134,17 @@ export function createSessionMatcher(cache: Pick<ReportCache, "sessions"> & Part
   ): SessionMatch {
     const sessionId = target?.sessionId;
     if (!sessionId) return { status: "unknown", agentId };
-    let session = sessions.find((candidate) =>
-      target.provider === "antigravity"
-        ? candidate.agent === "antigravity" && candidate.id === sessionId
-        : sessionKeyMatches(candidate.id, sessionId),
-    );
-    const refreshed = target.provider === "antigravity" ? updated.get(sessionId)?.session : undefined;
-    if (refreshed && (!session || (refreshed.lastActivity ?? "") > (session.lastActivity ?? "") ||
-      (refreshed.lastActivity === session.lastActivity && refreshed.usage.totalTokens > session.usage.totalTokens))) {
-      session = refreshed;
+    let session = sessions.find((candidate) => sessionMatches(candidate, target.provider, sessionId));
+    const refreshed = updated.get(`${target.provider}:${sessionId}`)?.session;
+    if (refreshed) {
+      const recordedAt = Date.parse(refreshed.lastActivity ?? "") || 0;
+      const indexedAt = Date.parse(session?.lastActivity ?? "") || 0;
+      const usedMoreTokens = refreshed.usage.totalTokens > (session?.usage.totalTokens ?? 0);
+      // Keep a priced Codex row once the report covers the same activity.
+      const newer = refreshed.recorded
+        ? recordedAt > indexedAt && usedMoreTokens
+        : recordedAt > indexedAt || (recordedAt === indexedAt && usedMoreTokens);
+      if (!session || newer) session = refreshed;
     }
     return session
       ? { status: "matched", agentId, providerSessionId: sessionId, session }
@@ -159,15 +177,25 @@ export function createSessionMatcher(cache: Pick<ReportCache, "sessions"> & Part
       const checkedAt = Date.now();
       const target = result ? remember(agentId, sessionTarget(result.agent))
         : sessionIds.get(agentId) ?? sessionTarget(undefined);
-      if (refresh && target.provider === "antigravity" && target.sessionId && cache.refreshSession) {
-        await refreshUsage(target.sessionId, cache.refreshSession);
+      const sessions = await cache.sessions(false);
+      const { sessionId, provider } = target;
+      const key = `${provider}:${sessionId}`;
+      const readAntigravity = cache.refreshSession;
+      if (refresh && provider === "antigravity" && sessionId && readAntigravity) {
+        await refreshUsage(key, () => readAntigravity(sessionId));
       }
+      if (provider === "codex" && target.child && sessionId) {
+        const indexed = sessions.find((session) => sessionMatches(session, provider, sessionId));
+        await refreshUsage(key, () => readCodex(sessionId, target.createdAt, indexed?.id)).catch(() => {});
+      }
+      const current = match(agentId, target, sessions);
       return {
-        match: match(agentId, target, await cache.sessions(false)),
+        match: current,
+        latestRequest: provider === "codex" && target.child && current.status !== "matched"
+          ? latestCodexRequest(result?.agent.lastUsage) : undefined,
         context: contextOf(result?.agent.lastUsage),
         checkedAt,
-        usageCheckedAt: target.provider === "antigravity" && target.sessionId
-          ? updated.get(target.sessionId)?.at : undefined,
+        usageCheckedAt: sessionId ? updated.get(key)?.at : undefined,
       };
     },
     /** A turn can start a new provider session; look the id up again next time. */
@@ -175,4 +203,9 @@ export function createSessionMatcher(cache: Pick<ReportCache, "sessions"> & Part
       sessionIds.delete(agentId);
     },
   };
+}
+
+function sessionMatches(candidate: SessionUsage, provider: string | undefined, id: string) {
+  if (provider === "antigravity") return candidate.agent === provider && candidate.id === id;
+  return (provider !== "codex" || candidate.agent === provider) && sessionKeyMatches(candidate.id, id);
 }
