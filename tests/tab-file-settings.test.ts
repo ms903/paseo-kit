@@ -74,3 +74,67 @@ test("the closed panel immediately shows its selected number of newest entries",
     assert.deepEqual(list.props.data, rows.slice(0, Number(limit)));
   }
 });
+
+test("the file command remains usable with the shortcut off and an enabled shortcut leaves editor saves alone", async () => {
+  const bundle = await build({
+    entryPoints: ["plugins/file-download/index.client.tsx"], bundle: true, write: false, format: "cjs",
+    external: ["@getpaseo/plugin", "react-native", "./client/downloads", "./client/settings-screen", "./client/history-panel", "./client/notice-host"],
+  });
+  let keydown: ((event: any) => void) | undefined;
+  let observer!: { snapshot(): void };
+  let enabled = false;
+  let shortcutCalls = 0;
+  const paths: string[] = [];
+  const commands: Record<string, any> = {};
+  const modules: Record<string, unknown> = {
+    "react-native": { Platform: { OS: "web" } },
+    "@getpaseo/plugin": { defineSettings: (s: unknown) => s, settingsRpc: () => ({ read: { name: "read" } }) },
+    "./client/downloads": {
+      createHostCheck: () => () => true, downloadFocusedFile: () => { shortcutCalls++; return true; },
+      downloadFile: (_rpc: unknown, _id: string, path: string) => { paths.push(path); },
+    },
+    "./client/history-panel": { createHistoryPanel: () => () => {} }, "./client/notice-host": {}, "./client/settings-screen": {},
+  };
+  const context = {
+    module: { exports: {} as any }, require: (name: string) => modules[name], navigator: { platform: "Linux" }, Blob,
+    window: {
+      addEventListener: (_: string, handler: typeof keydown) => { keydown = handler; },
+      removeEventListener: () => { keydown = undefined; },
+    },
+    location: { pathname: "/h/daemon/workspace/w" },
+    document: { querySelectorAll: (selector: string) => selector.includes("workspace-file-pane") ? [{
+      getClientRects: () => [1], parentElement: { __reactProps$fixture: { children: { props: {
+        isPaneFocused: true, isWorkspaceFocused: true,
+        content: { paneContextValue: { serverId: "daemon", workspaceId: "w", target: { kind: "file", path: "file.md" } } },
+      } } } },
+    }] : [] },
+  };
+  runInNewContext(bundle.outputFiles[0].text, context);
+  const dispose = context.module.exports.default({
+    rpc: async () => ({ status: "ready", values: { saveShortcut: enabled } }),
+    paseo: { observeEvents: () => ({
+      subscribe(value: typeof observer) { observer = value; return () => {}; }, release: async () => {},
+    }) },
+    addCommandCenterItem: (command: any) => { commands[command.id] = command; },
+    addWorkspacePanel() {}, addSidebarFooterItem() {}, addSettingsScreen() {},
+  });
+  await flush();
+  assert.equal(typeof keydown, "undefined");
+  commands["download-current-file"].onSelect({ workspace: { id: "w", hostId: "daemon" }, rpc: () => {} });
+  assert.deepEqual(paths, ["file.md"]);
+
+  enabled = true; observer.snapshot(); await flush();
+  const press = (target: unknown) => {
+    let prevented = false;
+    keydown?.({ key: "s", ctrlKey: true, target, preventDefault() { prevented = true; } });
+    return prevented;
+  };
+  assert.equal(press({ tagName: "textarea" }), false);
+  assert.equal(press({ isContentEditable: true }), false);
+  assert.equal(press({ closest: () => ({ className: "cm-editor" }) }), false);
+  assert.equal(shortcutCalls, 0);
+  assert.equal(press({ tagName: "div" }), true);
+  assert.equal(shortcutCalls, 1);
+  dispose();
+  assert.equal(typeof keydown, "undefined");
+});
