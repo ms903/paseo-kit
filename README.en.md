@@ -12,7 +12,7 @@ ms903 maintains this collection against **Paseo 0.18.1**. Each plugin has its ow
 | [file-download](plugins/file-download) | Download the focused file preview on web and desktop with Ctrl+S or Cmd+S. The shortcut still saves edits inside the editor. |
 | [paseo-latex-companion](plugins/paseo-latex-companion) | Render inline, display and table formulas on web and desktop alongside official Better Paseo with its Markdown renderer enabled. |
 | [host-monitor](plugins/host-monitor) | Read CPU, memory, disk, network and available GPU metrics for the selected host. |
-| [ccusage-stats](plugins/ccusage-stats) | See token counts, estimated costs and historical usage. Installation runs npm on the daemon host. |
+| [ccusage-stats](plugins/ccusage-stats) | See token counts, output speed, estimated costs and historical usage for the selected session. Installation runs npm on the daemon host. |
 
 ## Install and update
 
@@ -26,6 +26,22 @@ paseo plugin ls
 ```
 
 To install a specific revision, append `--ref <tag-or-commit>`. To return to a known revision of an existing Git installation, run `paseo plugin update <id> --ref <tag-or-commit>`. [Git source reference](https://github.com/getpaseo/paseo/blob/v0.18.1/docs/plugins.md#install-a-git-source)
+
+## Configure in Paseo
+
+Open **Settings → the host → Plugins** and choose an installed plugin. Its header controls activation.
+
+| Plugin | Settings |
+| --- | --- |
+| Heartbeat Status | Teal, blue, purple or amber clock. Continuous motion is on by default and respects Reduce Motion. |
+| Token Usage | Show session speed, choose the composer reading (live, average decode or whole turn), and set the live window. Defaults to on, live, 5 seconds. |
+| Closed agents | Show the last 10, 25 or 50 closed agents per workspace. Default 50. |
+| Download file | Enable the Ctrl+S / Cmd+S download shortcut. The command center action is always available. |
+| Host Monitor | Toggle five sidebar metrics individually. CPU and memory refresh every 2, 5, 10 or 30 seconds. Default 2. |
+| Media Studio | Configure playback quality, encoding, FFmpeg paths, storage folders, remote hosts, agent tools, turn cards and the composer shortcut. |
+| LaTeX Companion | Set formula size to 100%, 110%, 125% or 150% and toggle table typesetting. Preferences follow the reading client. |
+
+The clocks use the IBM Carbon palette. Session throughput integrates Drenalol’s Turn Speed meter and labels estimates where applicable. [IBM Design Language](https://www.ibm.com/design/language/color/) · [Turn Speed](https://github.com/Drenalol/paseo-turn-speed)
 
 ## License and provenance
 
