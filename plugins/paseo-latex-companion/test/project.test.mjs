@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { defaults, parsePreferences } from "../client/preferences.ts";
 import { displayFormula, inlineFormulas, projectTable, renderCell } from "../client/project.ts";
 
 test("extracts complete math without interpreting code, URLs, currency or escaped dollars", () => {
@@ -44,4 +45,11 @@ test("projects emphasis and formula nodes while keeping raw HTML inert", () => {
   assert.equal(fragment.children.find(child => child.tag === "code").textContent, "$code$");
   assert.ok(fragment.children.includes("<img src=x>"));
   assert.ok(!fragment.children.some(child => child.tag === "a"));
+});
+
+test("recovers valid display preferences when a stored field is stale", () => {
+  assert.deepEqual(parsePreferences(null), defaults);
+  assert.deepEqual(parsePreferences("{"), defaults);
+  assert.deepEqual(parsePreferences('{"scale":"500","tables":false}'), { scale: "100", tables: false });
+  assert.deepEqual(parsePreferences('{"scale":"125","tables":true}'), { scale: "125", tables: true });
 });
