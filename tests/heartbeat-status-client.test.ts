@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { runInNewContext } from "node:vm";
+import { build } from "esbuild";
 import { labelKey, REFRESH_MS, watchHeartbeats } from "../plugins/heartbeat-status/client/monitor";
 import type { HeartbeatSummary } from "../plugins/heartbeat-status/shared/heartbeat";
 
@@ -57,4 +59,70 @@ test("a poll that settles after plugin removal never republishes its indicators"
   stop();
   response.resolve({ agents: [parent, child] });
   await new Promise<void>((done) => setImmediate(done));
+});
+
+test("native fallback scopes composer pills to their agent and workspace and removes an expired heartbeat", async () => {
+  const bundle = await build({
+    entryPoints: ["plugins/heartbeat-status/index.client.tsx"],
+    bundle: true, format: "cjs", platform: "node", write: false,
+    external: ["@getpaseo/plugin", "@getpaseo/plugin/*", "react", "react/*", "react-native"],
+  });
+  const modules: Record<string, unknown> = {
+    "@getpaseo/plugin": { defineRpc: (contract: unknown) => contract },
+    "@getpaseo/plugin/client": {
+      defineTranslations: () => ({ message: (key: string) => key }),
+      useTranslation: () => ({ t: (key: string) => key }),
+    },
+    "@getpaseo/plugin/client/react-native": { WorkspaceRowBadge: "WorkspaceRowBadge" },
+    "react": {
+      useSyncExternalStore: (_subscribe: unknown, snapshot: () => number) => snapshot(),
+      useEffect: (setup: () => void) => setup(),
+    },
+    "react/jsx-runtime": { jsx: (type: string, props: unknown) => ({ type, props }) },
+    "react-native": { Platform: { OS: "ios" } },
+  };
+  let tick!: () => void;
+  const exports = { exports: {} as { default?: (client: unknown) => () => void } };
+  runInNewContext(bundle.outputFiles[0].text, {
+    module: exports, exports: exports.exports, require: (name: string) => modules[name],
+    setInterval: (refresh: () => void) => { tick = refresh; }, clearInterval() {},
+  });
+  let agents = [child, parent];
+  const pills = new Map<string, { label: string }>();
+  let badge!: (props: unknown) => { props: { label: string } } | null;
+  let badgeRemoved = false;
+  const stop = exports.exports.default!({
+    rpc: async () => ({ agents }),
+    paseo: { agents: { ref: () => ({ address: { serverId: "host" } }) } },
+    addWorkspaceRowBadgeItem(item: { Component: typeof badge }) {
+      badge = item.Component;
+      return () => { badgeRemoved = true; };
+    },
+    addComposerPill(item: { workspaceId: string; agentId: string; button: { label: string } }) {
+      const key = item.workspaceId + "/" + item.agentId;
+      assert.equal(pills.has(key), false);
+      pills.set(key, item.button);
+      return {
+        remove: () => pills.delete(key),
+        update(patch: { label: string }) { Object.assign(pills.get(key)!, patch); },
+      };
+    },
+  });
+  await new Promise<void>((done) => setImmediate(done));
+  assert.equal(pills.get("work/child")?.label, "direct");
+  assert.equal(pills.get("work/parent")?.label, "children");
+  const renderBadge = (workspaceId: string) => badge({ workspaceId, host: { id: "host" } });
+  assert.equal(renderBadge("work")?.props.label, "Tests, Release");
+  assert.equal(renderBadge("other-workspace"), null);
+
+  agents = [{ ...parent, direct: 1, workspaceId: "moved" }];
+  tick();
+  await new Promise<void>((done) => setImmediate(done));
+  assert.deepEqual([...pills.keys()], ["moved/parent"]);
+  assert.equal(pills.get("moved/parent")?.label, "both");
+  assert.equal(renderBadge("work"), null);
+  assert.equal(renderBadge("moved")?.props.label, "Release");
+  stop();
+  assert.equal(pills.size, 0);
+  assert.equal(badgeRemoved, true);
 });
