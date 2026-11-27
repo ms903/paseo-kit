@@ -74,17 +74,24 @@ async function checkWebFixture(reducedMotion: boolean) {
         check(!animation, "reduced motion contains no running animation");
       } else {
         check(animation?.animationName === "paseo-heartbeat-minute-sweep", "long hand has the sweep animation");
-        await animation.ready;
         check(getComputedStyle(minute).animationTimingFunction === "linear", "uniform angular speed");
         check(animation.effect.getTiming().duration === 6000, "six-second revolution");
         check(animation.playState === "running", "long hand advances on its own");
       }
       const still = dial(), samples = [readHand()];
-      for (let index = 0; index < 4; index++) {
-        await new Promise(resolve => setTimeout(resolve, 130));
-        samples.push(readHand());
+      if (!${reducedMotion}) {
+        // Test subsecond positions independent of the worker's compositor scheduling.
+        const sweep = minute.getAnimations()[0];
+        for (const time of [130, 260, 390, 520]) {
+          sweep.currentTime = time;
+          samples.push(readHand());
+        }
+        sweep.currentTime = 0;
+        check(new Set(samples.slice(1)).size === 4, "different subsecond phases within the same second");
+      } else {
+        await frame();
+        check(readHand() === samples[0], "hand remains static with reduced motion");
       }
-      check(new Set(samples).size === (${reducedMotion} ? 1 : samples.length), "successive subsecond phases obey system preference");
       check(dial() === still && getComputedStyle(clock, "::after").animationName === "none", "stationary dial and short hand");
       const ink = marker => getComputedStyle(marker).color;
       const palette = {

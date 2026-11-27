@@ -13,6 +13,8 @@ See [OVERVIEW.md](OVERVIEW.md) for what it shows, how it works and its limits.
 
 Open the full **Token usage** report and use **All agents** next to the period controls. Pick a source such as Codex or OpenCode. The totals, estimated cost, history, model breakdown, and sessions follow that choice. The filter stays selected when you change the period or refresh usage. Use the clear button to return to the combined report.
 
+<img src="preview/report-agent-filter.png" width="320" alt="Narrow Token Usage report filtered to Claude Code with its own totals and history">
+
 ## Install
 
 ```bash
