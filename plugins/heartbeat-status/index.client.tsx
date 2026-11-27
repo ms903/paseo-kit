@@ -1,3 +1,4 @@
+import type { PluginIconProps } from "@getpaseo/plugin";
 import {
   useTranslation,
   type PluginButtonContentProps,
@@ -5,17 +6,21 @@ import {
   type PluginWorkspaceRowBadgeItemProps,
 } from "@getpaseo/plugin/client";
 import { WorkspaceRowBadge } from "@getpaseo/plugin/client/react-native";
-import { useEffect, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useSyncExternalStore } from "react";
 import { Text, View } from "react-native";
 import { createClockIcon } from "./client/clock";
 import { messages } from "./client/messages";
 import { labelKey, watchHeartbeats } from "./client/monitor";
+import { appearanceTitle, HeartbeatSettingsScreen } from "./client/settings-screen";
+import { watchAppearance } from "./client/settings-sync";
 import { decorateWeb } from "./client/web";
 import { heartbeatSummaryRpc, type HeartbeatSummary } from "./shared/heartbeat";
+import { defaults } from "./shared/settings";
 
 export default function contribute(client: PluginClientContext) {
   const clock = createClockIcon();
   let rows: readonly HeartbeatSummary[] = [];
+  let appearance = defaults;
   let version = 0;
   let stopped = false;
   let decorations: ReturnType<typeof decorateWeb> | undefined;
@@ -90,21 +95,25 @@ export default function contribute(client: PluginClientContext) {
   function bindHost(hostId: string) {
     if (!decorations && !stopped) {
       decorations = decorateWeb(hostId, () => client.i18n.locale);
+      decorations.setSettings(appearance);
       stopWatchingDecorations = decorations.subscribe(refreshViews);
       decorations.update(rows);
     }
     return decorations;
   }
 
-  function WorkspaceBadge({ workspaceId, host }: PluginWorkspaceRowBadgeItemProps) {
+  function WorkspaceBadge({ workspaceId, host, theme }: PluginWorkspaceRowBadgeItemProps) {
     useSyncExternalStore(subscribe, snapshot, snapshot);
     const { t } = useTranslation(messages);
+    const surface = theme.colors.surface0;
+    const ThemedClock = useMemo(() => (props: PluginIconProps) =>
+      <clock.Icon {...props} surface={surface} />, [surface]);
     useEffect(() => bindHost(host.id)?.mountWorkspace(workspaceId), [host.id, workspaceId]);
     if (decorations?.isWorkspaceDecorated(workspaceId)) return null;
     const workspaceRows = rows.filter((row) => row.workspaceId === workspaceId);
     if (!workspaceRows.length) return null;
     const name = (row: HeartbeatSummary) => row.title || t("agent", { id: row.agentId });
-    return <WorkspaceRowBadge icon={clock.Icon} tone="muted"
+    return <WorkspaceRowBadge icon={ThemedClock} tone="muted"
       label={workspaceRows.map(name).join(", ")}
       accessibilityLabel={workspaceRows.map((row) =>
         t("details", { name: name(row), direct: row.direct, descendants: row.descendants })).join(" ")} />;
@@ -112,6 +121,14 @@ export default function contribute(client: PluginClientContext) {
 
   const removeBadge = client.addWorkspaceRowBadgeItem({
     id: "scheduled-heartbeats", title: messages.message("heading"), icon: "Clock", Component: WorkspaceBadge,
+  });
+  const removeScreen = client.addSettingsScreen({
+    id: "appearance", title: appearanceTitle, icon: "Clock", Component: HeartbeatSettingsScreen,
+  });
+  const stopAppearance = watchAppearance(client, (settings) => {
+    appearance = settings;
+    decorations?.setSettings(settings);
+    clock.setSettings(settings);
   });
   const stopPolling = watchHeartbeats(() => client.rpc(heartbeatSummaryRpc, { agentIds: [] }), (agents) => {
     rows = agents;
@@ -123,6 +140,8 @@ export default function contribute(client: PluginClientContext) {
   });
   return () => {
     stopped = true;
+    stopAppearance();
+    removeScreen();
     stopPolling();
     clock.dispose();
     stopWatchingDecorations?.();

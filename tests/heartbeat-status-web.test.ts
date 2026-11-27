@@ -16,7 +16,7 @@ const chrome = [
 ].find((path): path is string => !!path && existsSync(path));
 
 const options = { skip: !chrome, timeout: 20_000 };
-test("ticks a clock after each marked title and in idle slots while preserving native activity", options, () => checkWebFixture(false));
+test("sweeps the clock hand continuously after each marked title and in idle slots", options, () => checkWebFixture(false));
 test("keeps the same clock static when reduced motion is requested", options, () => checkWebFixture(true));
 
 async function checkWebFixture(reducedMotion: boolean) {
@@ -73,17 +73,38 @@ async function checkWebFixture(reducedMotion: boolean) {
       if (${reducedMotion}) {
         check(!animation, "reduced motion contains no running animation");
       } else {
-        check(animation?.animationName === "paseo-heartbeat-minute-tick", "long hand has the tick animation");
+        check(animation?.animationName === "paseo-heartbeat-minute-sweep", "long hand has the sweep animation");
         await animation.ready;
+        check(getComputedStyle(minute).animationTimingFunction === "linear", "uniform angular speed");
+        check(animation.effect.getTiming().duration === 6000, "six-second revolution");
         check(animation.playState === "running", "long hand advances on its own");
       }
-      const still = dial(), first = readHand();
-      await new Promise(resolve => setTimeout(resolve, 1150));
-      check(${reducedMotion} ? readHand() === first : readHand() !== first, "minute hand obeys system preference");
+      const still = dial(), samples = [readHand()];
+      for (let index = 0; index < 4; index++) {
+        await new Promise(resolve => setTimeout(resolve, 130));
+        samples.push(readHand());
+      }
+      check(new Set(samples).size === (${reducedMotion} ? 1 : samples.length), "successive subsecond phases obey system preference");
       check(dial() === still && getComputedStyle(clock, "::after").animationName === "none", "stationary dial and short hand");
-      const lightInk = getComputedStyle(get(sideMark)).color;
-      document.documentElement.classList.add("dark");
-      check(getComputedStyle(get(sideMark)).color !== lightInk, "clock follows the app theme");
+      const ink = marker => getComputedStyle(marker).color;
+      const palette = {
+        teal: ["rgb(0, 125, 121)", "rgb(61, 219, 217)"],
+        blue: ["rgb(15, 98, 254)", "rgb(120, 169, 255)"],
+        violet: ["rgb(138, 63, 252)", "rgb(212, 187, 255)"],
+        amber: ["rgb(142, 106, 0)", "rgb(241, 194, 27)"],
+      };
+      const systemDark = matchMedia("(prefers-color-scheme: dark)").matches;
+      check(ink(clock) === palette.teal[+systemDark], "default Carbon teal follows system");
+      for (const [accent, colors] of Object.entries(palette)) {
+        a.setSettings({ accent, animate: false });
+        document.documentElement.className = "light";
+        check(ink(clock) === colors[0] && ink(get(sideMark)) === colors[0], "explicit light accent " + accent);
+        document.documentElement.className = "dark";
+        check(ink(clock) === colors[1] && ink(get(sideMark)) === colors[1], "explicit dark accent " + accent);
+      }
+      check(clock === get(tabMark) && minute.getAnimations().length === 0, "disabling motion on the existing clock");
+      a.setSettings({ accent: "violet", animate: true });
+      check(minute.getAnimations().length === (${reducedMotion} ? 0 : 1), "restoring motion still respects device preference");
       const scroll = get('[data-testid="workspace-tabs-scroll"]');
       scroll.style.width = "201px"; window.dispatchEvent(new Event("resize")); await frame();
       check(!get(tabMark).hasAttribute("data-paseo-heartbeat-wide") && active.getBoundingClientRect().width === originalWidth, "packed strip width");
@@ -107,6 +128,7 @@ async function checkWebFixture(reducedMotion: boolean) {
       stopBadge(); await frame(); check(!get(sideMark) && getComputedStyle(attention.firstElementChild).visibility === "visible", "restore original dot when hidden");
       history.pushState({}, "", "/h/other/workspace/w"); window.dispatchEvent(new PopStateEvent("popstate")); await frame();
       check(!a.isAgentDecorated("active") && other.isAgentDecorated("active"), "changed host");
+      check(ink(get(tabMark)) === palette.teal[1], "each host retains its own accent");
       check(get(tabMark).title.includes("自身心跳 1 · 子会话心跳 0"), "wrong routed summary");
       other.update([]); check(!get(tabMark), "stopped heartbeat");
       a.dispose(); other.dispose(); check(!get(tabMark) && !get(sideMark), "disposed markers");
@@ -128,7 +150,7 @@ async function checkWebFixture(reducedMotion: boolean) {
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
   const { port } = server.address() as { port: number };
   const proc = spawn(chrome!, ["--headless", "--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu",
-    "--disable-background-networking", ...(reducedMotion ? ["--force-prefers-reduced-motion"] : []), `--user-data-dir=${profile}`, `http://127.0.0.1:${port}/h/h/workspace/w`], { stdio: "ignore" });
+    "--disable-background-networking", ...(reducedMotion ? ["--force-prefers-reduced-motion", "--force-dark-mode"] : []), `--user-data-dir=${profile}`, `http://127.0.0.1:${port}/h/h/workspace/w`], { stdio: "ignore" });
   proc.once("error", report.reject);
   proc.once("exit", code => report.reject(new Error("Chrome exited before reporting (" + code + ")")));
   const deadline = setTimeout(() => report.reject(new Error("Chrome did not finish the fixture")), 15_000);

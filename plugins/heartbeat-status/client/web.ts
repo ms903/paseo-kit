@@ -1,9 +1,11 @@
 /// <reference lib="dom" />
 import { Platform } from "react-native";
 import type { HeartbeatSummary } from "../shared/heartbeat";
+import { accentColors, defaults, type HeartbeatSettings } from "../shared/settings";
 
 export interface WebDecoration {
   update(rows: readonly HeartbeatSummary[]): void;
+  setSettings(value: HeartbeatSettings): void;
   mountWorkspace(workspaceId: string): () => void;
   isWorkspaceDecorated(workspaceId: string): boolean;
   isAgentDecorated(agentId: string): boolean;
@@ -14,6 +16,7 @@ export interface WebDecoration {
 const noOp = () => {};
 const unavailable: WebDecoration = {
   update: noOp,
+  setSettings: noOp,
   mountWorkspace: () => noOp,
   isWorkspaceDecorated: () => false,
   isAgentDecorated: () => false,
@@ -48,10 +51,11 @@ function workspaceOnScreen(hostId: string): string | null {
 type Placement = "tab" | "idle" | "adjacent";
 
 const CLOCK_STYLES = `
+${Object.entries(accentColors).map(([name, ink]) =>
+  `[data-paseo-heartbeat-accent="${name}"] { --heartbeat-light: ${ink.light}; --heartbeat-dark: ${ink.dark}; }`
+).join("\n")}
 [data-paseo-heartbeat] {
-  --heartbeat-fallback-ink: #50686b;
-  color: var(--colors-foreground-muted, var(--heartbeat-fallback-ink));
-  color: color-mix(in srgb, var(--colors-foreground-muted, var(--heartbeat-fallback-ink)) 72%, #4d837f);
+  color: var(--heartbeat-light);
   position: relative;
   display: inline-block;
   flex: 0 0 auto;
@@ -90,17 +94,19 @@ const CLOCK_STYLES = `
   background: currentColor;
   transform-origin: 50% 3.75px;
 }
-@keyframes paseo-heartbeat-minute-tick {
+@keyframes paseo-heartbeat-minute-sweep {
   from { transform: rotate(0turn); }
   to { transform: rotate(1turn); }
 }
 @media (prefers-reduced-motion: no-preference) {
-  [data-paseo-heartbeat] > [data-paseo-heartbeat-minute] {
-    animation: paseo-heartbeat-minute-tick 8s steps(8, end) infinite;
+  [data-paseo-heartbeat]:not([data-paseo-heartbeat-static]) > [data-paseo-heartbeat-minute],
+  [data-testid="paseo-heartbeat-fallback-hand"] {
+    animation: paseo-heartbeat-minute-sweep 6s linear infinite;
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  [data-paseo-heartbeat] > [data-paseo-heartbeat-minute] { animation: none; }
+  [data-paseo-heartbeat] > [data-paseo-heartbeat-minute],
+  [data-testid="paseo-heartbeat-fallback-hand"] { animation: none; }
 }
 /* Paseo measures title text before plugins mount. Its 8px padding on both sides
    gives this chip 16px of additional content space for the dial and native 4px gap. */
@@ -119,11 +125,13 @@ const CLOCK_STYLES = `
   inset: 0;
   margin: auto;
 }
+/* Paseo's explicit theme is a root class. Its System option follows the OS. */
+html.dark [data-paseo-heartbeat] { color: var(--heartbeat-dark); }
 @media (prefers-color-scheme: dark) {
-  [data-paseo-heartbeat] { --heartbeat-fallback-ink: #a4b8b6; }
+  html:not(.light) [data-paseo-heartbeat] { color: var(--heartbeat-dark); }
 }
 @media (forced-colors: active) {
-  [data-paseo-heartbeat] { color: ButtonText; }
+  [data-paseo-heartbeat] { color: ButtonText !important; }
 }
 `;
 
@@ -154,7 +162,12 @@ export function decorateWeb(hostId: string, locale = () => document.documentElem
   const activeAgents = new Map<string, HeartbeatSummary>();
   const workspaceRows = new Map<string, HeartbeatSummary[]>();
   const mountedWorkspaces = new Map<string, number>();
+  let appearance = defaults;
   const marks = new Map<Element, HTMLSpanElement>();
+  function applyAppearance(marker: HTMLSpanElement) {
+    marker.dataset.paseoHeartbeatAccent = appearance.accent;
+    marker.toggleAttribute("data-paseo-heartbeat-static", !appearance.animate);
+  }
   const listeners = new Set<() => void>();
   const observedStrips = new Set<Element>();
   const layoutObserver = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(schedule);
@@ -174,6 +187,7 @@ export function decorateWeb(hostId: string, locale = () => document.documentElem
       if (!node) {
         node = document.createElement("span");
         node.setAttribute("role", "img");
+        applyAppearance(node);
         node.dataset.paseoHeartbeat = placement === "tab" ? "tab" : "sidebar";
         const minute = document.createElement("span");
         minute.dataset.paseoHeartbeatMinute = "";
@@ -283,6 +297,11 @@ export function decorateWeb(hostId: string, locale = () => document.documentElem
   window.addEventListener("resize", schedule);
 
   return {
+    setSettings(value) {
+      if (disposed || (appearance.accent === value.accent && appearance.animate === value.animate)) return;
+      appearance = value;
+      for (const marker of marks.values()) applyAppearance(marker);
+    },
     update(rows) {
       if (disposed) return;
       activeAgents.clear();
