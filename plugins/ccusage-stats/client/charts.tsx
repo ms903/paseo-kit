@@ -2,7 +2,7 @@ import type { PluginTheme } from "@getpaseo/plugin";
 import { useState } from "react";
 import { Pressable, Text, View, type LayoutChangeEvent, type PressableStateCallbackType } from "react-native";
 import type { PeriodKind, UsagePeriod, UsageView } from "../shared/usage";
-import { agentSwatch, foldAgents, OTHER_AGENT, type Swatch } from "./data";
+import { agentSeriesKey, agentSwatch, foldAgents, OTHER_AGENTS_LABEL, type Swatch } from "./data";
 import { agentLabel, formatPeriodLong, formatPeriodShort, formatTokens } from "./format";
 
 // Thin marks with a hairline of surface between neighbours, so segments read apart without outlines.
@@ -208,12 +208,13 @@ export function agentSegments(
   order: readonly string[],
   period: UsagePeriod | undefined,
   measure: "totalTokens" | "cost" = "totalTokens",
+  swatchOrder = order,
 ): ShareSegment[] {
   if (!period) return [];
   return foldAgents(period.agents, order).map((agent) => ({
-    key: agent.agent,
+    key: agentSeriesKey(agent.agent),
     value: agent.usage[measure] ?? 0,
-    swatch: agentSwatch(theme, order, agent.agent),
+    swatch: agentSwatch(theme, swatchOrder, agent.agent),
   }));
 }
 
@@ -226,6 +227,7 @@ export function PeriodBars({
   kind,
   periods,
   order,
+  swatchOrder = order,
   selected,
   onSelect,
   height,
@@ -237,6 +239,7 @@ export function PeriodBars({
   kind: PeriodKind;
   periods: readonly UsagePeriod[];
   order: readonly string[];
+  swatchOrder?: readonly string[];
   selected: number;
   onSelect(index: number): void;
   height: number;
@@ -277,7 +280,7 @@ export function PeriodBars({
           {periods.map((period, index) => {
             const isSelected = index === selected;
             const barHeight = (period.usage.totalTokens / max) * height;
-            const segments = agentSegments(theme, order, period).filter((segment) => segment.value > 0);
+            const segments = agentSegments(theme, order, period, "totalTokens", swatchOrder).filter((segment) => segment.value > 0);
             return (
               <Pressable
                 key={period.period}
@@ -357,16 +360,16 @@ export function Legend({
   );
   const keys = [
     ...order.filter((agent) => present.has(agent)),
-    ...(present.has(OTHER_AGENT) ? [OTHER_AGENT] : []),
+    ...(present.has(null) ? [null] : []),
   ];
   if (keys.length < 2) return null;
   return (
     <View style={{ flexDirection: "row", flexWrap: "wrap", columnGap: 12, rowGap: 4 }}>
       {keys.map((agent) => (
-        <View key={agent} style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
+        <View key={agentSeriesKey(agent)} style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
           <SwatchDot swatch={agentSwatch(theme, order, agent)} />
           <Text style={{ fontSize: 11, color: theme.colors.foregroundMuted }}>
-            {agentLabel(agent)}
+            {agent === null ? OTHER_AGENTS_LABEL : agentLabel(agent)}
           </Text>
         </View>
       ))}

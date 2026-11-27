@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Pressable, Text, View, type PressableStateCallbackType, type TextStyle, type ViewStyle } from "react-native";
 import type { ModelUsage, TodayPreview, Usage, UsagePeriod, UsageView } from "../shared/usage";
 import { ShareBar, SwatchDot, type ShareSegment } from "./charts";
-import { agentSwatch, chartColors, foldAgents } from "./data";
+import { agentSeriesKey, agentSwatch, chartColors, foldAgents, OTHER_AGENTS_LABEL } from "./data";
 import {
   agentLabel,
   formatCost,
@@ -282,9 +282,9 @@ export function AgentList({
     <View>
       {expandable ? <UsageTableHeader theme={theme} label="Agent" columns={columns} trailing={14} /> : null}
       {agents.map((agent, index) => {
-        const canExpand = expandable && agent.models.length > 0;
+        const canExpand = expandable && agent.agent !== null && agent.models.length > 0;
         const open = canExpand && expanded === agent.agent;
-        const name = agentLabel(agent.agent);
+        const name = agent.agent === null ? OTHER_AGENTS_LABEL : agentLabel(agent.agent);
         const share = formatPercent(agent.usage.totalTokens / total);
         const row = (
           <View style={{ flexDirection: "row", alignItems: "center", gap: 10, minHeight: 38, paddingVertical: 6 }}>
@@ -306,7 +306,7 @@ export function AgentList({
           </View>
         );
         return (
-          <View key={agent.agent} style={{
+          <View key={agentSeriesKey(agent.agent)} style={{
             borderTopWidth: index > 0 ? 1 : 0,
             borderTopColor: theme.colors.border,
           }}>

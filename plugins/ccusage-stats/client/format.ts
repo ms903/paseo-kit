@@ -121,6 +121,7 @@ export function formatAgo(timestamp: number, now = Date.now()): string {
 }
 
 const AGENT_LABELS: Record<string, string> = {
+  "": "Unknown agent",
   claude: "Claude Code",
   codex: "Codex",
   opencode: "OpenCode",
@@ -142,7 +143,8 @@ const AGENT_LABELS: Record<string, string> = {
 };
 
 export function agentLabel(agent: string): string {
-  return AGENT_LABELS[agent] ?? agent.charAt(0).toUpperCase() + agent.slice(1);
+  const label = AGENT_LABELS[agent];
+  return typeof label === "string" ? label : agent.charAt(0).toUpperCase() + agent.slice(1);
 }
 
 /** A Codex rollout name or a UUID, shortened to something recognizable. */

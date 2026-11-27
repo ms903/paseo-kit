@@ -45,18 +45,19 @@ function SessionControl({ theme, icon, label, onPress, active, expanded, disable
   );
 }
 
-export function SessionList({ theme, hostId, report, clock, narrow, period }: {
+export function SessionList({ theme, hostId, report, agent, swatchOrder, clock, narrow, period }: {
   theme: PluginTheme;
   hostId: string;
   report: UsageReport;
+  agent: string | null;
+  swatchOrder: readonly string[];
   clock: Intl.DateTimeFormat;
   narrow: boolean;
   period?: { since: string; until: string; label: string };
 }) {
   const [text, setText] = useState("");
   const [search, setSearch] = useState("");
-  const [agent, setAgent] = useState("");
-  const [openFilter, setOpenFilter] = useState<"agent" | "date" | null>(null);
+  const [openDateFilter, setOpenDateFilter] = useState(false);
   const [withinPeriod, setWithinPeriod] = useState(false);
   const [page, setPage] = useState({ filter: "", offset: 0 });
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -69,10 +70,14 @@ export function SessionList({ theme, hostId, report, clock, narrow, period }: {
     const timer = setTimeout(() => setSearch(text.trim()), 220);
     return () => clearTimeout(timer);
   }, [text]);
+  useEffect(() => {
+    setPage({ filter: "", offset: 0 });
+    setExpanded(null);
+  }, [agent]);
   const query = useQuery({
     queryKey: ["usage-session-list", hostId, report.revision, filter, offset],
     queryFn: () => list({
-      agent: agent || undefined, search: search || undefined,
+      agent: agent ?? undefined, search: search || undefined,
       since: dateRange?.since, until: dateRange?.until, offset,
     }),
     enabled: ready,
@@ -85,8 +90,7 @@ export function SessionList({ theme, hostId, report, clock, narrow, period }: {
     gcTime: 60_000,
   });
   const result = ready ? query.data : undefined;
-  const rows = result?.sessions ?? (!agent && !text.trim() && !dateRange && offset === 0 ? report.recentSessions : []);
-  const allAgents = result?.agents ?? report.agents;
+  const rows = result?.sessions ?? (agent === null && !text.trim() && !dateRange && offset === 0 ? report.recentSessions : []);
   const first = result?.offset ?? 0;
   const total = result?.total ?? rows.length;
   const columns = narrow ? undefined : usageColumns(rows.map((session) => session.usage));
@@ -125,29 +129,18 @@ export function SessionList({ theme, hostId, report, clock, narrow, period }: {
             </Pressable>
           ) : null}
         </View>
-        <SessionControl theme={theme} icon="Filter" label={agent ? agentLabel(agent) : "All agents"}
-          expanded={openFilter === "agent"} active={!!agent}
-          onPress={() => setOpenFilter(openFilter === "agent" ? null : "agent")} />
         {period ? (
           <SessionControl theme={theme} icon="Calendar" active={!!dateRange}
-            label={dateRange ? dateRange.label : "All dates"} expanded={openFilter === "date"}
-            onPress={() => setOpenFilter(openFilter === "date" ? null : "date")} />
+            label={dateRange ? dateRange.label : "All dates"} expanded={openDateFilter}
+            onPress={() => setOpenDateFilter(open => !open)} />
         ) : null}
       </View>
-      {openFilter === "agent" ? (
-        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
-          {["", ...allAgents].map((option) => (
-            <SessionControl key={option} theme={theme} label={option ? agentLabel(option) : "All agents"}
-              active={agent === option} onPress={() => { setAgent(option); setOpenFilter(null); setExpanded(null); }} />
-          ))}
-        </View>
-      ) : null}
-      {openFilter === "date" && period ? (
+      {openDateFilter && period ? (
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
           {[false, true].map((limit) => (
             <SessionControl key={String(limit)} theme={theme} label={limit ? period.label : "All dates"}
               active={withinPeriod === limit}
-              onPress={() => { setWithinPeriod(limit); setOpenFilter(null); setExpanded(null); }} />
+              onPress={() => { setWithinPeriod(limit); setOpenDateFilter(false); setExpanded(null); }} />
           ))}
         </View>
       ) : null}
@@ -180,7 +173,7 @@ export function SessionList({ theme, hostId, report, clock, narrow, period }: {
                     backgroundColor: open || hovered || pressed ? theme.colors.surface2 : undefined,
                   })}
                 >
-                  <SwatchDot swatch={agentSwatch(theme, report.agents, session.agent)} />
+                  <SwatchDot swatch={agentSwatch(theme, swatchOrder, session.agent)} />
                   <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
                     <Text style={{ fontSize: FONT.body, color: theme.colors.foreground }}>
                       {name}
@@ -219,7 +212,7 @@ export function SessionList({ theme, hostId, report, clock, narrow, period }: {
       ) : !result || !result.complete ? (
         report.sessionRefreshError || report.refreshError ? null : <Text style={muted}>Reading session history…</Text>
       ) : !rows.length ? (
-        <Text style={muted}>{agent || search || dateRange ? "No matching sessions." : "No sessions yet."}</Text>
+        <Text style={muted}>{agent !== null || search || dateRange ? "No matching sessions." : "No sessions yet."}</Text>
       ) : null}
       {total > SESSION_PAGE_SIZE ? (
         <View style={{ flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 6 }}>

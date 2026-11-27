@@ -156,6 +156,7 @@ function buildReport(
     today,
     timezone,
     agents: agentOrder(raw.daily.filter((row) => row.period >= firstDay)),
+    sessionAgents: sessionAgentIds(sessions),
     daily: series("daily", raw.daily, today, from),
     weekly: series("weekly", raw.weekly, today, from),
     monthly: series("monthly", raw.monthly, today, from),
@@ -163,6 +164,10 @@ function buildReport(
     recentSessions: sessions.slice(0, SESSION_PAGE_SIZE),
     refreshError: null,
   };
+}
+
+function sessionAgentIds(sessions: SessionUsage[]): string[] {
+  return [...new Set(sessions.map(({ agent }) => agent))].sort();
 }
 
 interface Snapshot {
@@ -368,9 +373,11 @@ export function createReportCache(scan = runCcusage, cacheDirectory?: string): R
       void store.readReport().then((saved) => {
         if (!saved || signal.aborted) return;
         const { olderSessions, ...report } = saved;
+        const sessions = report.recentSessions.concat(olderSessions ?? []);
+        report.sessionAgents ??= sessionAgentIds(sessions);
         snapshot = {
           report,
-          sessions: report.recentSessions.concat(olderSessions ?? []),
+          sessions,
           sessionsComplete: olderSessions !== undefined || (
             report.recentSessions.length < SESSION_PAGE_SIZE && !report.sessionsPending && !report.sessionRefreshError
           ),

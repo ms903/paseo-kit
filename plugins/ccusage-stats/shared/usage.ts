@@ -53,8 +53,10 @@ export const usageReportSchema = z.object({
   /** The daemon's local date, the same calendar ccusage groups by. */
   today: z.string(),
   timezone: z.string(),
-  /** Every agent seen in the report, heaviest first: a stable order for colors. */
+  /** Agents in the visible calendar window, heaviest first, for chart colors. */
   agents: z.array(z.string()),
+  /** Source IDs across indexed sessions, including rows beyond the first page. */
+  sessionAgents: z.array(z.string()).optional(),
   /** Contiguous series, oldest first; the last entry is the current period. */
   daily: z.array(periodSchema),
   weekly: z.array(periodSchema),
@@ -180,3 +182,14 @@ export const EMPTY_USAGE: Usage = {
   totalTokens: 0,
   cost: 0,
 };
+
+export function addUsage(a: Usage, b: Usage): Usage {
+  return {
+    inputTokens: a.inputTokens + b.inputTokens,
+    outputTokens: a.outputTokens + b.outputTokens,
+    cacheCreationTokens: a.cacheCreationTokens + b.cacheCreationTokens,
+    cacheReadTokens: a.cacheReadTokens + b.cacheReadTokens,
+    totalTokens: a.totalTokens + b.totalTokens,
+    cost: a.cost === null || b.cost === null ? null : a.cost + b.cost,
+  };
+}

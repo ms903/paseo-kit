@@ -373,6 +373,9 @@ test("filters and pages lifetime sessions outside the recent report without a lo
   t.after(() => cache.stop());
   const report = await complete(cache);
   assert.equal(report.recentSessions.length, SESSION_PAGE_SIZE);
+  assert.deepEqual(report.agents, ["codex"]);
+  assert.deepEqual(report.sessionAgents, ["codex", "pi"]);
+  assert.ok(report.recentSessions.every((session) => session.agent === "codex"));
   const scansAfterRefresh = scans;
   const first = await cache.listSessions({});
   const second = await cache.listSessions({ offset: SESSION_PAGE_SIZE });
@@ -386,6 +389,10 @@ test("filters and pages lifetime sessions outside the recent report without a lo
   assert.equal(scans, scansAfterRefresh);
   cache.stop();
 
+  const store = createUsageStore(report.timezone, root);
+  const legacy = (await store.readReport())!;
+  delete legacy.sessionAgents;
+  await store.saveReport(legacy);
   const reopened = createReportCache(async () => { scans++; return []; }, root);
   t.after(() => reopened.stop());
   const filtered = await reopened.listSessions({ agent: "pi", search: "  NeOn  " });
@@ -396,12 +403,20 @@ test("filters and pages lifetime sessions outside the recent report without a lo
   assert.equal(scans, scansAfterRefresh);
   const restored = await reopened.read();
   assert.ok(!("status" in restored));
+  assert.deepEqual(restored.sessionAgents, ["codex", "pi"]);
   assert.equal("olderSessions" in restored, false);
+
+  const { olderSessions: _olderSessions, ...overview } = legacy;
+  await store.saveReport({ ...overview, sessionAgents: ["codex", "pi"] });
+  await store.saveReport({ ...overview, sessionAgents: ["codex", "opencode"] });
+  assert.deepEqual((await store.readReport())?.sessionAgents, ["codex", "opencode"]);
 
   const list = createSessionList("Asia/Hong_Kong");
   const catalog = [filtered.sessions[0], { ...filtered.sessions[0], id: "unknown-date", lastActivity: null }];
   assert.equal(list(catalog, { until: "2026-11-19" }, true).total, 0);
   assert.deepEqual(list(catalog, { since: "2026-11-20", until: "2026-11-20" }, true).sessions, filtered.sessions);
+  const unnamed = { ...filtered.sessions[0], agent: "" };
+  assert.deepEqual(list([...catalog, unnamed], { agent: "" }, true).sessions, [unnamed]);
 });
 
 test("identical daily metrics skip session scans, and redistribute or reconnect after the verification interval", async (t) => {
