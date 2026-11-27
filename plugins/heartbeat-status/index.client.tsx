@@ -7,10 +7,11 @@ import {
 } from "@getpaseo/plugin/client";
 import { WorkspaceRowBadge } from "@getpaseo/plugin/client/react-native";
 import { useEffect, useMemo, useSyncExternalStore } from "react";
-import { Text, View } from "react-native";
+import { Platform, Text, View } from "react-native";
 import { createClockIcon } from "./client/clock";
 import { messages } from "./client/messages";
 import { labelKey, watchHeartbeats } from "./client/monitor";
+import { NativeWorkspaceClock } from "./client/native-workspace-clock";
 import { appearanceTitle, HeartbeatSettingsScreen } from "./client/settings-screen";
 import { watchAppearance } from "./client/settings-sync";
 import { decorateWeb } from "./client/web";
@@ -113,10 +114,19 @@ export default function contribute(client: PluginClientContext) {
     const workspaceRows = rows.filter((row) => row.workspaceId === workspaceId);
     if (!workspaceRows.length) return null;
     const name = (row: HeartbeatSummary) => row.title || t("agent", { id: row.agentId });
+    const label = workspaceRows.map((row) =>
+      t("details", { name: name(row), direct: row.direct, descendants: row.descendants })).join(" ");
+    if (Platform.OS === "ios" || Platform.OS === "android") {
+      return <NativeWorkspaceClock
+        key={host.id + ":" + workspaceId}
+        rowId={"sidebar-workspace-row-" + host.id + ":" + workspaceId}
+        Icon={ThemedClock} label={label}
+        fallback={<WorkspaceRowBadge icon={ThemedClock} accessibilityLabel={label} />}
+      />;
+    }
     return <WorkspaceRowBadge icon={ThemedClock} tone="muted"
       label={workspaceRows.map(name).join(", ")}
-      accessibilityLabel={workspaceRows.map((row) =>
-        t("details", { name: name(row), direct: row.direct, descendants: row.descendants })).join(" ")} />;
+      accessibilityLabel={label} />;
   }
 
   const removeBadge = client.addWorkspaceRowBadgeItem({

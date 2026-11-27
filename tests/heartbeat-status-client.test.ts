@@ -143,7 +143,7 @@ test("native fallback scopes composer pills to their agent and workspace and rem
   });
   let agents = [child, parent];
   const pills = new Map<string, { label: string }>();
-  let badge!: (props: unknown) => { props: { label: string } } | null;
+  let badge!: (props: unknown) => { props: { rowId: string; fallback: { props: { label?: string } } } } | null;
   let badgeRemoved = false;
   const stop = exports.exports.default!({
     rpc: async () => ({ agents }),
@@ -170,7 +170,8 @@ test("native fallback scopes composer pills to their agent and workspace and rem
   assert.equal(pills.get("work/child")?.label, "direct");
   assert.equal(pills.get("work/parent")?.label, "children");
   const renderBadge = (workspaceId: string) => badge({ workspaceId, host: { id: "host" }, theme: { colors: { surface0: "#fff" } } });
-  assert.equal(renderBadge("work")?.props.label, "Tests, Release");
+  assert.equal(renderBadge("work")?.props.rowId, "sidebar-workspace-row-host:work");
+  assert.equal(renderBadge("work")?.props.fallback.props.label, undefined);
   assert.equal(renderBadge("other-workspace"), null);
 
   agents = [{ ...parent, direct: 1, workspaceId: "moved" }];
@@ -179,7 +180,7 @@ test("native fallback scopes composer pills to their agent and workspace and rem
   assert.deepEqual([...pills.keys()], ["moved/parent"]);
   assert.equal(pills.get("moved/parent")?.label, "both");
   assert.equal(renderBadge("work"), null);
-  assert.equal(renderBadge("moved")?.props.label, "Release");
+  assert.equal(renderBadge("moved")?.props.rowId, "sidebar-workspace-row-host:moved");
   stop();
   assert.equal(pills.size, 0);
   assert.equal(badgeRemoved, true);
