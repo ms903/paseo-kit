@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { agentSeriesKey, foldAgents } from "../plugins/ccusage-stats/client/data";
 import { filterUsageReport, reportAgentOptions } from "../plugins/ccusage-stats/client/report-filter";
 import { EMPTY_USAGE, type AgentUsage, type Usage, type UsagePeriod, type UsageReport } from "../plugins/ccusage-stats/shared/usage";
 
@@ -112,4 +113,16 @@ test("combines repeated source rows using the scanner's token totals, preserving
     agent: "opencode", usage: period.usage,
     models: [{ model: "shared-model", usage: usage(3, null) }, { model: "small", usage: usage(1) }],
   }]);
+});
+
+test("keeps a source actually named Other distinct from the folded chart series", () => {
+  const actualOther = source("other", 12);
+  const names = ["other", "codex", "claude", "gemini", "opencode", "pi"];
+  const rows = [actualOther, ...names.slice(1).map(name => source(name, 1))];
+  const folded = foldAgents(rows, names);
+  assert.deepEqual(folded.map(row => row.agent), ["other", "codex", "claude", "gemini", null]);
+  assert.equal(folded[0], actualOther);
+  assert.deepEqual(folded.at(-1)?.usage, usage(2));
+  assert.equal(new Set(folded.map(row => agentSeriesKey(row.agent))).size, folded.length);
+  assert.deepEqual(foldAgents([actualOther], ["other"]), [actualOther]);
 });
