@@ -1,6 +1,6 @@
 Downloads the file you are previewing in Paseo to your computer with the save shortcut: Cmd+S on macOS, Ctrl+S on Windows and Linux. It works for any file Paseo can preview, including files outside the workspace such as output an agent wrote to `/tmp`, which Paseo's file tree cannot download.
 
-Press the shortcut while a file preview tab is focused. The shortcut follows the focused file in the current window, including when two windows show different files from the same workspace. Other tabs keep their usual shortcuts, including saving edits in a file editor. The same action is in the Command Center (Ctrl+K or Cmd+K) as "Download current file".
+Press the shortcut while a file preview tab is focused. The shortcut follows the focused file in the current window, including when two windows show different files from the same workspace. Other tabs keep their usual shortcuts, including saving edits in a file editor. The shortcut defaults to on and can be turned off for the host under **Settings → Plugins → Download file → Downloads**. The same action is in the Command Center (Ctrl+K or Cmd+K) as "Download current file".
 
 "Open downloads" in the Command Center opens a list of the files downloaded since the page loaded, with their progress and any error. Each entry can be downloaded again, have its path copied, or be removed. The list lives in memory and starts empty after a reload.
 

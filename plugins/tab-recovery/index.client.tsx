@@ -1,7 +1,9 @@
 import type { PluginClientContext } from "@getpaseo/plugin/client";
+import { HistorySettingsScreen } from "./client/settings-screen";
 import { ClosedAgentsPanel } from "./client/closed-panel";
 
 export default function contribute(client: PluginClientContext) {
+  client.addSettingsScreen({ id: "history", title: "History", icon: "History", Component: HistorySettingsScreen });
   client.addWorkspacePanel({
     id: "closed",
     title: "Closed agents",

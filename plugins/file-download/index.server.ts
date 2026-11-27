@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import v8 from "node:v8";
 import type { PluginHandlerContext, PluginServerContext } from "@getpaseo/plugin/server";
+import { downloadSettings } from "./shared/settings";
 import { createTransferStore } from "./server/transfers";
 import { closeRpc, hostRpc, openRpc, readRpc } from "./shared/download";
 
@@ -35,6 +36,7 @@ async function resolveTabPath(paseo: Paseo, workspaceId: string, tabPath: string
 }
 
 export default function contribute(server: PluginServerContext) {
+  server.registerSettings(downloadSettings);
   const transfers = createTransferStore();
 
   server.handle(hostRpc, async () => ({ serverId: await readServerId() }));

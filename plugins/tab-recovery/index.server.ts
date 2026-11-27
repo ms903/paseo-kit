@@ -1,6 +1,7 @@
 import v8 from "node:v8";
 import type { PluginServerContext } from "@getpaseo/plugin/server";
 import { listClosedAgents, restoreClosedAgent } from "./server/agents";
+import { historySettings } from "./shared/settings";
 import { closedAgentsRpc, restoreAgentRpc } from "./shared/agents";
 
 // The plugin process validates every daemon message with one generated function of about 11 MB
@@ -12,6 +13,7 @@ import { closedAgentsRpc, restoreAgentRpc } from "./shared/agents";
 v8.setFlagsFromString("--no-maglev");
 
 export default function contribute(server: PluginServerContext) {
+  server.registerSettings(historySettings);
   server.handle(closedAgentsRpc, async ({ workspaceId }, { paseo }) => ({
     agents: await listClosedAgents(paseo, workspaceId),
   }));
