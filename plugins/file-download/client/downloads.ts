@@ -79,7 +79,7 @@ export async function downloadFile(rpc: Rpc, workspaceId: string, path: string):
   const id = String(nextId++);
   const state = { canceled: false };
   cancellations.set(id, state);
-  const name = path.split("/").filter(Boolean).at(-1) ?? path;
+  const name = path.split(/[\\/]/).filter(Boolean).at(-1) ?? path;
   setRecords([
     { id, path, name, workspaceId, startedAt: Date.now(), status: "downloading", received: 0, total: 0, error: null },
     ...records,
@@ -132,14 +132,18 @@ export async function downloadFile(rpc: Rpc, workspaceId: string, path: string):
  */
 export function createHostCheck(rpc: Rpc): (serverId: string) => boolean {
   let own: string | null = null;
-  void rpc(hostRpc, {})
-    .then((result) => {
-      own = result.serverId;
-      return undefined;
-    })
-    .catch(() => undefined);
-  // Until the answer arrives, or if the daemon cannot tell, assume a single host.
-  return (serverId) => own === null || own === serverId;
+  let pending = false;
+  function identify() {
+    if (own !== null || pending) return;
+    pending = true;
+    void rpc(hostRpc, {}).then((result) => { own = result.serverId; })
+      .catch(() => {}).finally(() => { pending = false; });
+  }
+  identify();
+  return (serverId) => {
+    identify();
+    return own === serverId;
+  };
 }
 
 /**

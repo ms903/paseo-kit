@@ -19,6 +19,8 @@ paseo plugin install "$PWD"
 
 Requires Paseo 0.11.1 or later with plugins enabled on the daemon.
 
+Version 0.1.0 targets the Paseo 0.18.1 plugin SDK. It keeps the `file-download` plugin ID for existing installations. To update a Git installation from the same source, run `paseo plugin update file-download --yes`.
+
 ## Develop
 
 ```bash
