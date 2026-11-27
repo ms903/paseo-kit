@@ -48,6 +48,12 @@ jobs:
         run: npm test
       - if: runner.os == 'Windows'
         run: npm run test:plugins
+      - name: Test Windows downloads
+        if: runner.os == 'Windows'
+        run: node --import tsx --test tests/downloads.test.ts
+      - name: Test Windows media paths and executable discovery
+        if: runner.os == 'Windows'
+        run: node --import tsx --test --test-name-pattern="Windows tool discovery" tests/media.test.ts
 
   host-smoke:
     name: Install plugins in a Paseo daemon
