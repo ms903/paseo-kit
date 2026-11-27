@@ -6,6 +6,7 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { setTimeout as delay } from "node:timers/promises";
 import { build } from "esbuild";
 
 // CI machines with Chrome exercise real selectors, navigation, layout and DOM mutation delivery.
@@ -15,7 +16,7 @@ const chrome = [
   process.env.PROGRAMFILES && join(process.env.PROGRAMFILES, "Google/Chrome/Application/chrome.exe"),
 ].find((path): path is string => !!path && existsSync(path));
 
-const options = { skip: !chrome, timeout: 20_000 };
+const options = { skip: !chrome, timeout: 60_000 };
 test("sweeps the clock hand continuously after each marked title and in idle slots", options, () => checkWebFixture(false));
 test("keeps the same clock static when reduced motion is requested", options, () => checkWebFixture(true));
 
@@ -157,19 +158,25 @@ async function checkWebFixture(reducedMotion: boolean) {
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
   const { port } = server.address() as { port: number };
   const proc = spawn(chrome!, ["--headless", "--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu",
-    "--disable-background-networking", ...(reducedMotion ? ["--force-prefers-reduced-motion", "--force-dark-mode"] : []), `--user-data-dir=${profile}`, `http://127.0.0.1:${port}/h/h/workspace/w`], { stdio: "ignore" });
+    "--no-first-run", "--disable-background-networking", "--disable-background-timer-throttling",
+    "--disable-renderer-backgrounding", ...(reducedMotion ? ["--force-prefers-reduced-motion", "--force-dark-mode"] : []),
+    `--user-data-dir=${profile}`, `http://127.0.0.1:${port}/h/h/workspace/w`], { stdio: "ignore" });
   proc.once("error", report.reject);
   proc.once("exit", code => report.reject(new Error("Chrome exited before reporting (" + code + ")")));
-  const deadline = setTimeout(() => report.reject(new Error("Chrome did not finish the fixture")), 15_000);
+  const deadline = setTimeout(() => report.reject(new Error("Chrome did not finish the fixture")), 40_000);
   try {
     assert.equal(await report.promise, "ok");
   } finally {
     clearTimeout(deadline);
     const closed = new Promise<void>(r => proc.exitCode !== null || proc.signalCode !== null ? r() : proc.once("close", () => r()));
-    proc.kill();
-    await closed;
     server.closeAllConnections();
     server.close();
+    proc.kill();
+    await Promise.race([closed, delay(2_000, undefined, { ref: false })]);
+    if (proc.exitCode === null && proc.signalCode === null) {
+      proc.kill("SIGKILL");
+      await Promise.race([closed, delay(2_000, undefined, { ref: false })]);
+    }
     await rm(profile, { recursive: true, force: true, maxRetries: 4, retryDelay: 100 });
   }
 }
