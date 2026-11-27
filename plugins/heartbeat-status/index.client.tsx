@@ -7,14 +7,14 @@ import {
 import { WorkspaceRowBadge } from "@getpaseo/plugin/client/react-native";
 import { useEffect, useSyncExternalStore } from "react";
 import { Text, View } from "react-native";
+import { createClockIcon } from "./client/clock";
 import { messages } from "./client/messages";
 import { labelKey, watchHeartbeats } from "./client/monitor";
 import { decorateWeb } from "./client/web";
 import { heartbeatSummaryRpc, type HeartbeatSummary } from "./shared/heartbeat";
 
-const icon = "HeartPulse";
-
 export default function contribute(client: PluginClientContext) {
+  const clock = createClockIcon();
   let rows: readonly HeartbeatSummary[] = [];
   let version = 0;
   let stopped = false;
@@ -68,13 +68,15 @@ export default function contribute(client: PluginClientContext) {
       if (pill) {
         if (pill.label !== label) {
           pill.label = label;
-          pill.registration.update({ label: messages.message(label) });
+          const title = messages.message(label);
+          pill.registration.update({ title, label: title });
         }
       } else {
+        const title = messages.message(label);
         const registration = client.addComposerPill({
           id: "scheduled-heartbeat", workspaceId: row.workspaceId, agentId,
           button: {
-            icon, title: messages.message("heading"), label: messages.message(label),
+            icon: clock.Icon, title, label: title,
             behavior: { kind: "popover", Content: Details },
           },
         });
@@ -102,14 +104,14 @@ export default function contribute(client: PluginClientContext) {
     const workspaceRows = rows.filter((row) => row.workspaceId === workspaceId);
     if (!workspaceRows.length) return null;
     const name = (row: HeartbeatSummary) => row.title || t("agent", { id: row.agentId });
-    return <WorkspaceRowBadge icon={icon} tone="info"
+    return <WorkspaceRowBadge icon={clock.Icon} tone="muted"
       label={workspaceRows.map(name).join(", ")}
       accessibilityLabel={workspaceRows.map((row) =>
         t("details", { name: name(row), direct: row.direct, descendants: row.descendants })).join(" ")} />;
   }
 
   const removeBadge = client.addWorkspaceRowBadgeItem({
-    id: "scheduled-heartbeats", title: messages.message("heading"), icon, Component: WorkspaceBadge,
+    id: "scheduled-heartbeats", title: messages.message("heading"), icon: "Clock", Component: WorkspaceBadge,
   });
   const stopPolling = watchHeartbeats(() => client.rpc(heartbeatSummaryRpc, { agentIds: [] }), (agents) => {
     rows = agents;
@@ -122,6 +124,7 @@ export default function contribute(client: PluginClientContext) {
   return () => {
     stopped = true;
     stopPolling();
+    clock.dispose();
     stopWatchingDecorations?.();
     decorations?.dispose();
     for (const pill of pills.values()) pill.registration.remove();
