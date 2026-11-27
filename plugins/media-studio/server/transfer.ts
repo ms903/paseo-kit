@@ -213,7 +213,7 @@ export function createTransfers() {
         const records = (await allRecords()).filter((entry) => !entry.completedPath);
         if (records.length >= MAX_UPLOADS || records.reduce((sum, entry) => sum + entry.size, 0) + input.size > MAX_UPLOAD_BYTES) throw new Error("Unfinished upload quota reached");
         await dir.host.mkdirp(dir.path);
-        const partPath = path.posix.join(dir.path, partName(name, uploadId));
+        const partPath = (dir.host.remote ? path.posix : path).join(dir.path, partName(name, uploadId));
         const now = Date.now();
         upload = {
           record: { version: 1, uploadId, dir: dir.ref, name, size: input.size, lastModified, fingerprint: input.fingerprint, partPath, received: [], createdAt: now, updatedAt: now },

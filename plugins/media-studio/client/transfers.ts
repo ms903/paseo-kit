@@ -8,7 +8,6 @@ import {
   uploadBeginRpc,
   uploadFinishRpc,
   uploadWriteRpc,
-  statusRpc,
   type ByteRange,
   type PendingUpload,
 } from "../shared/rpc";
@@ -214,10 +213,6 @@ function createJob(file: WebFile, dir: string, resumedFrom: number | null = null
   return job;
 }
 
-function uploadOne(file: WebFile, dir: string): Promise<string | null> {
-  return start(createJob(file, dir));
-}
-
 // When Paseo reloads the plugin (an update, a reload, a host reconnect), this module is evaluated
 // again and the old copy's state is gone, but the page and the picked files are not. The unloading
 // copy leaves its unfinished uploads on the page's global object, keyed by the daemon's server ID,
@@ -230,6 +225,9 @@ interface HandedOver {
   uploadId: string | null;
   resumedFrom: number | null;
 }
+// A selection can contain more files than the workers can run. Keep the waiting files available
+// to the next plugin instance as well as those that already have an upload ID.
+const waiting = new Set<HandedOver>();
 type Handover = Record<string, HandedOver[]>;
 const HANDOVER_KEY = "__paseoMediaStudioUploads";
 let serverId: string | null = null;
@@ -247,14 +245,16 @@ function handoverStore(): Handover {
 
 /** Called when this copy of the plugin unloads. */
 export function handOverUploads(): void {
-  if (jobs.size === 0) return;
-  if (serverId) {
+  if (serverId && (jobs.size || waiting.size)) {
     const store = handoverStore();
     store[serverId] = [
       ...(store[serverId] ?? []),
-      ...[...jobs].map((job) => ({ file: job.file, dir: job.dir, paused: job.paused, uploadId: job.uploadId, resumedFrom: job.resumedFrom })),
+      ...[...jobs].map((job) => ({ file: job.file, dir: job.dir, paused: job.paused || job.stop === "pause", uploadId: job.uploadId, resumedFrom: job.resumedFrom })),
+      ...waiting,
     ];
   }
+  waiting.clear();
+  serverId = null;
   for (const job of jobs) {
     job.stop = "handover";
     job.wake?.();
@@ -263,44 +263,61 @@ export function handOverUploads(): void {
 }
 
 /** Called when this copy of the plugin loads: learns the daemon's ID and continues handed-over uploads. */
-export async function adoptUploads(): Promise<void> {
-  for (let attempt = 1; attempt <= 10 && !serverId; attempt += 1) {
+export async function adoptUploads(signal: AbortSignal): Promise<void> {
+  const { paseo } = getPluginClient();
+  for (let attempt = 1; attempt <= 10 && !signal.aborted; attempt += 1) {
     try {
-      serverId = (await getPluginClient().rpc(statusRpc, {})).serverId ?? "unknown";
+      // The SDK reports the identity of this installation's daemon, independently of its media tools.
+      const { self } = await paseo.hosts.list();
+      if (signal.aborted || !self.serverId) return;
+      serverId = self.serverId;
+      break;
     } catch {
-      await new Promise((resolve) => setTimeout(resolve, 1000 * attempt));
+      if (signal.aborted || attempt === 10) return;
+      await new Promise<void>((resolve) => {
+        const finish = () => {
+          clearTimeout(timer);
+          signal.removeEventListener("abort", finish);
+          resolve();
+        };
+        const timer = setTimeout(finish, 1000 * attempt);
+        signal.addEventListener("abort", finish, { once: true });
+      });
     }
   }
-  if (!serverId) return;
+  if (!serverId || signal.aborted) return;
   const store = handoverStore();
   const entries = store[serverId] ?? [];
   delete store[serverId];
-  for (const entry of entries) {
-    const job = createJob(entry.file, entry.dir, entry.resumedFrom);
-    job.uploadId = entry.uploadId;
-    if (entry.paused) {
-      job.paused = true;
-      updateTransfer(job.transferId, { status: "paused", resumedFrom: entry.resumedFrom ?? 0, ...controls(job, "paused") });
-    } else {
-      void start(job);
+  await uploadQueue(entries);
+}
+
+async function uploadQueue(entries: HandedOver[]): Promise<string[]> {
+  for (const entry of entries) waiting.add(entry);
+  const done: string[] = [];
+  let index = 0;
+  const worker = async () => {
+    while (index < entries.length) {
+      const entry = entries[index++];
+      if (!waiting.delete(entry)) return; // already handed to the next plugin instance
+      const job = createJob(entry.file, entry.dir, entry.resumedFrom);
+      job.uploadId = entry.uploadId;
+      if (entry.paused) {
+        job.paused = true;
+        updateTransfer(job.transferId, { status: "paused", resumedFrom: entry.resumedFrom ?? 0, ...controls(job, "paused") });
+      } else {
+        const path = await start(job);
+        if (path) done.push(path);
+      }
     }
-  }
+  };
+  await Promise.all(Array.from({ length: Math.min(FILES_PARALLEL, entries.length) }, worker));
+  return done;
 }
 
 /** Uploads files into `dir` (a daemon folder or alias:/path). Resolves with the paths that landed. */
-export async function uploadFiles(files: readonly WebFile[], dir: string): Promise<string[]> {
-  const queue = [...files];
-  const done: string[] = [];
-  const worker = async () => {
-    for (;;) {
-      const file = queue.shift();
-      if (!file) return;
-      const path = await uploadOne(file, dir);
-      if (path) done.push(path);
-    }
-  };
-  await Promise.all(Array.from({ length: Math.min(FILES_PARALLEL, files.length) }, worker));
-  return done;
+export function uploadFiles(files: readonly WebFile[], dir: string): Promise<string[]> {
+  return uploadQueue(files.map((file) => ({ file, dir, paused: false, uploadId: null, resumedFrom: null })));
 }
 
 /** Whether `file` is the file an unfinished upload started from: same name, size and modification time. */

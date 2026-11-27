@@ -1,7 +1,7 @@
 import { settingsRpc } from "@getpaseo/plugin";
 import type { PluginButtonRegistration, PluginClientContext, PluginText } from "@getpaseo/plugin/client";
-import { projectSummaryRpc, type ProjectSummary } from "../shared/rpc";
-import { settingsDefinition } from "../shared/settings";
+import { PROJECT_SUMMARY_BATCH_SIZE, projectSummaryRpc, type ProjectSummary } from "../shared/rpc";
+import { DEFAULT_SETTINGS, settingsDefinition } from "../shared/settings";
 import { messages } from "./i18n";
 import { openInMediaPanel } from "./state";
 
@@ -18,8 +18,8 @@ interface AgentLike {
   archivedAt?: string | null;
 }
 
-function pillState(summary: ProjectSummary | undefined, enabled: boolean) {
-  if (!enabled || !summary?.isMedia) return { visible: false };
+function pillState(summary: ProjectSummary | undefined) {
+  if (!summary?.isMedia) return { visible: false };
   const { video, audio, image } = summary;
   return {
     visible: true,
@@ -33,32 +33,42 @@ function pillState(summary: ProjectSummary | undefined, enabled: boolean) {
  * opens the media panel. Pills start hidden, so agents in code folders never show one.
  */
 export function contributeMediaPills(client: PluginClientContext): () => void {
-  const agents = new Map<string, { cwd: string; status?: string; pill: PluginButtonRegistration<PluginText> }>();
+  const agents = new Map<string, { workspaceId: string; cwd: string; status?: string; pill: PluginButtonRegistration<PluginText> }>();
   const lifetime = new AbortController();
   let timer: ReturnType<typeof setTimeout> | null = null;
+  let generation = 0;
   let freshDirs = new Set<string>();
 
   const enabled = async () => {
     const stored = await client.rpc(settingsRpc(settingsDefinition.id).read, {}).catch(() => null);
     const parsed = stored?.status === "ready" ? settingsDefinition.schema.safeParse(stored.values) : null;
-    return parsed?.success ? parsed.data.composerPill : true;
+    return parsed?.success ? parsed.data.composerPill : DEFAULT_SETTINGS.composerPill;
   };
 
   const refresh = async () => {
-    const dirs = [...new Set([...agents.values()].map((agent) => agent.cwd))].slice(0, 200);
-    if (dirs.length === 0 || lifetime.signal.aborted) return;
-    const fresh = freshDirs;
-    freshDirs = new Set();
+    const revision = ++generation;
+    const current = () => revision === generation && !lifetime.signal.aborted;
+    if (!agents.size || !current()) return;
     try {
       const show = await enabled();
-      // Folders that just had a turn scan again; the rest may answer from the daemon's cache.
-      const [stale, cached] = await Promise.all([
-        fresh.size ? client.rpc(projectSummaryRpc, { dirs: [...fresh], fresh: true }) : { projects: [] },
-        client.rpc(projectSummaryRpc, { dirs: dirs.filter((dir) => !fresh.has(dir)), fresh: false }),
-      ]);
-      if (lifetime.signal.aborted) return;
-      const byDir = new Map([...cached.projects, ...stale.projects].map((summary) => [summary.dir, summary]));
-      for (const agent of agents.values()) agent.pill.update(pillState(byDir.get(agent.cwd), show));
+      if (!current()) return;
+      const fresh = freshDirs;
+      freshDirs = new Set();
+      const byDir = new Map<string, ProjectSummary>();
+      if (show) {
+        const dirs = [...new Set([...agents.values()].map((agent) => agent.cwd))];
+        // A finished turn needs fresh data. Every active directory fits in one of the batches.
+        for (const rescan of [true, false]) {
+          const group = dirs.filter((dir) => fresh.has(dir) === rescan);
+          for (let i = 0; i < group.length; i += PROJECT_SUMMARY_BATCH_SIZE) {
+            const batch = group.slice(i, i + PROJECT_SUMMARY_BATCH_SIZE);
+            const { projects } = await client.rpc(projectSummaryRpc, { dirs: batch, fresh: rescan });
+            if (!current()) return;
+            for (const summary of projects) byDir.set(summary.dir, summary);
+          }
+        }
+      }
+      for (const agent of agents.values()) agent.pill.update(pillState(byDir.get(agent.cwd)));
     } catch (error) {
       if (!lifetime.signal.aborted) console.warn("[media-studio] Media pill refresh failed", error);
     }
@@ -84,7 +94,7 @@ export function contributeMediaPills(client: PluginClientContext): () => void {
       return false;
     }
     const known = agents.get(agent.id);
-    if (known && known.cwd === agent.cwd) {
+    if (known && known.cwd === agent.cwd && known.workspaceId === agent.workspaceId) {
       const finished = known.status === "running" && agent.status !== "running";
       known.status = agent.status;
       if (finished) freshDirs.add(agent.cwd);
@@ -103,7 +113,7 @@ export function contributeMediaPills(client: PluginClientContext): () => void {
         behavior: { kind: "action", onPress: () => openInMediaPanel(workspaceId, null) },
       },
     });
-    agents.set(agent.id, { cwd: agent.cwd, status: agent.status, pill });
+    agents.set(agent.id, { workspaceId, cwd: agent.cwd, status: agent.status, pill });
     return true;
   };
 

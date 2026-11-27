@@ -3,7 +3,7 @@ import { constants, promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { Readable, Writable } from "node:stream";
-import { IMAGE_EXTENSIONS, AUDIO_EXTENSIONS, VIDEO_EXTENSIONS, mediaKindOf } from "../shared/media";
+import { IMAGE_EXTENSIONS, AUDIO_EXTENSIONS, VIDEO_EXTENSIONS, isWindowsPath, mediaKindOf } from "../shared/media";
 import { REMOTE_SCAN } from "./remote-scan";
 import { run, type RunResult } from "./ffmpeg";
 import { scanMedia as scanLocal, type ScannedFile } from "./files";
@@ -93,7 +93,7 @@ async function isExecutable(file: string): Promise<boolean> {
   }
 }
 
-async function findLocalBinary(configuredPath: string, name: string, extra: string[] = []): Promise<string | null> {
+export async function findLocalBinary(configuredPath: string, name: string, extra: string[] = [], platform = process.platform): Promise<string | null> {
   if (configuredPath.trim()) {
     const resolved = configuredPath.trim().replace(/^~(?=\/|$)/, os.homedir());
     return (await isExecutable(resolved)) ? resolved : null;
@@ -108,7 +108,8 @@ async function findLocalBinary(configuredPath: string, name: string, extra: stri
     path.join("/usr/bin", name),
   ];
   for (const candidate of candidates) {
-    if (await isExecutable(candidate)) return candidate;
+    const file = platform === "win32" ? candidate + ".exe" : candidate;
+    if (await isExecutable(file)) return file;
   }
   return null;
 }
@@ -690,7 +691,8 @@ const REMOTE_REF = /^(?:ssh:\/\/([A-Za-z0-9][A-Za-z0-9._-]*)(\/.*)|([A-Za-z0-9][
  */
 export async function locate(input: string, cwd?: string | null): Promise<Located> {
   const value = input.trim();
-  const match = REMOTE_REF.exec(value);
+  const nativeWindows = process.platform === "win32" && isWindowsPath(value);
+  const match = nativeWindows ? null : REMOTE_REF.exec(value);
   if (match) {
     const alias = match[1] ?? match[3]!;
     let file = match[2] ?? match[4]!;
@@ -702,7 +704,7 @@ export async function locate(input: string, cwd?: string | null): Promise<Locate
       return { host, path: file, ref: refOf(host, file) };
     }
   }
-  if (cwd && REMOTE_REF.test(cwd.trim()) && !value.startsWith("/") && !value.startsWith("~")) {
+  if (cwd && REMOTE_REF.test(cwd.trim()) && !nativeWindows && !value.startsWith("/") && !value.startsWith("~")) {
     const base = await locate(cwd);
     if (base.host.remote) {
       const file = path.posix.normalize(path.posix.join(base.path, value));

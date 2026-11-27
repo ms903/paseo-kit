@@ -1,7 +1,7 @@
 import { settingsRpc } from "@getpaseo/plugin";
 import type { PluginClientContext } from "@getpaseo/plugin/client";
 import { CARD_KIND, CARD_MAX_FILES, CARD_VERSION, cardSchema, isPreviewToolName, parseToolInput, type CardData } from "./shared/cards";
-import { AMBIGUOUS_VIDEO_EXTENSIONS, AUDIO_EXTENSIONS, PANEL_IMAGE_EXTENSIONS, VIDEO_EXTENSIONS, joinPath } from "./shared/media";
+import { AMBIGUOUS_VIDEO_EXTENSIONS, AUDIO_EXTENSIONS, PANEL_IMAGE_EXTENSIONS, VIDEO_EXTENSIONS, isWindowsPath, joinPath } from "./shared/media";
 import { settingsDefinition } from "./shared/settings";
 import { MediaCard } from "./client/card";
 import { MediaFilePanel } from "./client/file-panel";
@@ -15,7 +15,8 @@ import { isWeb, pickFiles } from "./client/web";
 
 export default function contribute(client: PluginClientContext) {
   setPluginClient(client);
-  void adoptUploads();
+  const lifetime = new AbortController();
+  void adoptUploads(lifetime.signal);
 
   client.addWorkspacePanel({
     id: "media",
@@ -108,7 +109,7 @@ export default function contribute(client: PluginClientContext) {
         return;
       }
       const remote = /^[A-Za-z0-9][A-Za-z0-9._-]*:/.test(target);
-      const absolute = target.startsWith("/") || target.startsWith("~") || remote;
+      const absolute = target.startsWith("/") || target.startsWith("~") || remote || isWindowsPath(target);
       openInMediaPanel(agent.workspaceId, absolute ? target : joinPath(agent.cwd, target));
     },
   });
@@ -116,6 +117,7 @@ export default function contribute(client: PluginClientContext) {
   const stopPills = contributeMediaPills(client);
 
   return () => {
+    lifetime.abort();
     stopPills();
     handOverUploads();
     setPluginClient(null);

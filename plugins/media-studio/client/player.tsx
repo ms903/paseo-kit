@@ -4,7 +4,7 @@ import { Icon, Modal, TextInput, copyText, useToast } from "@getpaseo/plugin/cli
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ActivityIndicator, Image, Pressable, ScrollView, Text, View } from "react-native";
-import { formatBytes, formatDuration, formatFps, formatTimecode, formatTimecodeShort, parseTimecode, relativeTo, snapToFrame } from "../shared/media";
+import { displayPath, formatBytes, formatDuration, formatFps, formatTimecode, formatTimecodeShort, parseTimecode, relativeTo, snapToFrame } from "../shared/media";
 import { imageRpc, loudnessRpc, streamCloseRpc, streamOpenRpc, streamReadRpc, type MediaInfo, type Quality, type ReviewNote } from "../shared/rpc";
 import { settingsDefinition } from "../shared/settings";
 import { messages } from "./i18n";
@@ -85,7 +85,7 @@ export function MediaViewer(props: ViewerProps) {
 function describeLocation(path: string, workspaceRoot: string | null): { host: string | null; name: string; folder: string } {
   const host = /^[^/:]+:\//.test(path) ? path.slice(0, path.indexOf(":")) : null;
   const local = host ? path.slice(host.length + 1) : path;
-  const relative = relativeTo(host ? null : workspaceRoot, local);
+  const relative = displayPath(relativeTo(host ? null : workspaceRoot, local));
   const cut = relative.lastIndexOf("/");
   return { host, name: cut >= 0 ? relative.slice(cut + 1) : relative, folder: cut > 0 ? relative.slice(0, cut) : cut === 0 ? "/" : "" };
 }
