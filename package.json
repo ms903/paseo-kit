@@ -1,16 +1,25 @@
 {
   "name": "paseo-kit",
   "private": true,
-  "description": "A collection of Paseo plugins: host-monitor, ccusage-stats, file-download, tab-recovery and media-studio.",
+  "description": "Six Paseo plugins for host metrics, agent usage, downloads, closed agents, media, and LaTeX replies.",
+  "author": "ms903",
   "license": "Apache-2.0",
+  "homepage": "https://github.com/ms903/paseo-kit#readme",
+  "bugs": {
+    "url": "https://github.com/ms903/paseo-kit"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/ms903/paseo-kit.git"
   },
   "scripts": {
-    "install:all": "for d in plugins/*/; do (cd \"$d\" && npm install) || exit 1; done",
-    "typecheck": "for d in plugins/*/; do echo \"== $d\"; (cd \"$d\" && npm run --silent typecheck) || exit 1; done",
-    "test": "tsx --test tests/*.test.ts"
+    "install:all": "node scripts/plugins.mjs install",
+    "typecheck": "node scripts/plugins.mjs typecheck",
+    "test": "node --import tsx --test \"tests/*.test.ts\" && npm run test:plugins",
+    "test:plugins": "node scripts/plugins.mjs test",
+    "check:builds": "node scripts/plugins.mjs check:build",
+    "check:mobile": "node scripts/check-mobile.mjs",
+    "smoke:host": "node scripts/host-smoke.mjs"
   },
   "devDependencies": {
     "esbuild": "0.28.2",
