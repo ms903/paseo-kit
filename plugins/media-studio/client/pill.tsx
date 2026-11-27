@@ -148,6 +148,15 @@ export function contributeMediaPills(client: PluginClientContext): () => void {
       if (!lifetime.signal.aborted) console.error("[media-studio] Agent observation failed", error);
     });
 
+  // A remote app can change the same host preference while this sidebar stays mounted.
+  client.paseo.observeEvents(["status.plugin_settings_changed"], { signal: lifetime.signal }).subscribe({
+    snapshot() {}, // The agent-list snapshot already refreshes on connect and reconnect.
+    update(message) {
+      if (message.type === "status" && message.payload.status === "plugin_settings_changed"
+        && message.payload.settingsId === settingsDefinition.id) void refresh();
+    },
+  });
+
   const interval = setInterval(() => void refresh(), REFRESH_MS);
   return () => {
     lifetime.abort();

@@ -128,6 +128,8 @@
     "slashHint": "[path]"
   },
   "settings": {
+    "restoreDefaults": "Restore defaults",
+    "reload": "Reload settings",
     "title": "Media studio",
     "toolsTitle": "ffmpeg",
     "thisHost": "Daemon host",

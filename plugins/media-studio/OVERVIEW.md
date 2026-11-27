@@ -40,7 +40,7 @@ The SSH key must work without a password prompt. All commands for a host share o
 - Thumbnails, filmstrips and waveforms are cached under `~/.cache/paseo-media-studio` on the host, up to 1 GB.
 - The card after a turn lives in the daemon's memory and is gone after a daemon restart; the files are not.
 
-Automatic turn cards and composer scans are disabled by default. Enable them in settings.
+Change **Settings → Plugins → Media studio** for the selected host. Automatic turn cards and composer scans default to off. Changing the composer preference refreshes existing agent pills. Playback starts at Auto quality with hardware encoding enabled when available. You can also set the default upload and saved-frame folders, the agent providers, local tool paths, allowed SSH aliases and the ffmpeg path for each SSH host.
 SSH hosts use an explicit alias list and require Python 3 for portable filesystem operations.
 Storage usage and cleanup are in Media studio settings: preview cache 1 GiB, notes 64 MiB,
 saved frames 1 GiB across tracked files (512 MiB per folder), unfinished uploads 16 GiB / 64 tasks.

@@ -313,12 +313,21 @@ test("portable content hashing matches SHA-256 across padding and chunk boundari
 test("composer pills skip disabled scans and batch every active project when enabled", async (t) => {
   const { contributeMediaPills } = await import("../plugins/media-studio/client/pill");
   let observer: any;
+  let onSettings!: (event: unknown) => void;
+  let settingsSignal!: AbortSignal;
   let setting: boolean | null = false;
   const calls: { dirs: string[]; fresh: boolean }[] = [];
   const visibility = new Map<string, boolean>();
   t.mock.timers.enable({ apis: ["setInterval", "setTimeout"] });
   const client = {
-    paseo: { agents: { list: async () => ({ subscription: { subscribe: (value: unknown) => { observer = value; } } }) } },
+    paseo: {
+      agents: { list: async () => ({ subscription: { subscribe: (value: unknown) => { observer = value; } } }) },
+      observeEvents(events: string[], { signal }: { signal: AbortSignal }) {
+        assert.deepEqual(events, ["status.plugin_settings_changed"]);
+        settingsSignal = signal;
+        return { subscribe: ({ update }: { update: (event: unknown) => void }) => { onSettings = update; } };
+      },
+    },
     addComposerPill: ({ agentId }: { agentId: string }) => ({
       update: ({ visible }: { visible: boolean }) => visibility.set(agentId, visible),
       remove: () => visibility.delete(agentId),
@@ -348,7 +357,11 @@ test("composer pills skip disabled scans and batch every active project when ena
     await flush();
     assert.equal(calls.length, 0);
     setting = true;
-    t.mock.timers.tick(90_000);
+    const emitSettings = (settingsId: string) => onSettings({ type: "status", payload: { status: "plugin_settings_changed", settingsId } });
+    emitSettings("another-plugin");
+    await flush();
+    assert.equal(calls.length, 0);
+    emitSettings("media-studio");
     await flush();
     assert.deepEqual(calls.map(call => [call.dirs.length, call.fresh]), [[200, false], [5, false]]);
     assert.equal([...visibility.values()].filter(Boolean).length, entries.length);
@@ -362,12 +375,13 @@ test("composer pills skip disabled scans and batch every active project when ena
     assert.deepEqual(calls.map(call => [call.dirs.length, call.fresh]), [[200, true], [5, true]]);
     setting = false;
     calls.length = 0;
-    t.mock.timers.tick(90_000);
+    emitSettings("media-studio");
     await flush();
     assert.equal(calls.length, 0);
     assert.ok([...visibility.values()].every(value => !value));
   } finally {
     stop();
+    assert.equal(settingsSignal.aborted, true);
   }
 });
 

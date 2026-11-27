@@ -4,7 +4,9 @@ CPU, RAM, GPU and disk have individual icons and small meters when space permits
 
 **Details** opens a full page with available space for each disk and a GPU section. When Host Monitor is installed on several hosts, use Paseo's host picker in the page header to switch between them. Each host reports its own numbers and history.
 
-The daemon takes samples when a client displays the metrics. CPU and network samples are shared for two seconds, disks for thirty seconds, and macOS memory for ten seconds. Disk reads run one at a time. The plugin keeps up to 90 samples in memory through an active viewing period.
+Settings are saved on the selected host. In **Settings → Plugins → Host monitor**, choose which footer readings to show and how often to refresh. All five readings are enabled by default. Disabling GPU also stops its footer probe, and disabling all readings hides the footer and stops its polling. An open details page continues to request the full readings.
+
+The daemon takes samples when a client displays the metrics. The app polls every two seconds by default, with five, ten and thirty seconds also available. CPU and network samples are shared for two seconds, disks for thirty seconds, and macOS memory for ten seconds. Disk reads run one at a time. The plugin keeps up to 90 samples in memory through an active viewing period.
 
 The footer shows the busiest GPU's utilization and the device count on multi-GPU hosts, for example `×8 96%`. Drivers that only identify the hardware show a device count. The popover and **Details** list each detected card's utilization, used and total VRAM, and temperature as available. NVIDIA row numbers match `nvidia-smi` on Linux and Windows. Linux DRM cards use their sysfs names. Cards with the same model share a heading. Apple Silicon utilization comes from `ioreg`. Visible monitors share one host probe per ten seconds and check for absent devices at most once a minute.
 
