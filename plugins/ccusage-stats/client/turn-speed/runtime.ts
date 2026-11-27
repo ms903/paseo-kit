@@ -38,6 +38,8 @@ export function createTurnSpeedRuntime(client: PluginClientContext) {
   // Keep finished worker totals for this parent turn without holding its old timeline open.
   const recent = new Map<string, { start: number; members: Map<string, TeamMemberView> }>();
   const retryTimers = new Set<ReturnType<typeof setTimeout>>();
+  const supportsFocus = typeof client.composers === "function";
+  let roots = new Set<string>();
   let disposed = false;
   let revision = 0;
   let updating = false;
@@ -73,9 +75,24 @@ export function createTurnSpeedRuntime(client: PluginClientContext) {
     else parents.delete(id);
     return old !== parents.get(id);
   }
+  function watchedRoots() {
+    const focused = supportsFocus ? client.composers({ focused: true })[0] : undefined;
+    return new Set([...watchers.keys()].filter(id => !unavailable.has(id) &&
+      (!supportsFocus || (focused && client.composers({ agentId: id })[0] === focused))));
+  }
+  function stillVisible(agentId: string) {
+    const visible = watchedRoots();
+    const visited = new Set<string>();
+    for (let id: string | undefined = agentId; id && !visited.has(id); id = parents.get(id)) {
+      if (visible.has(id)) return true;
+      visited.add(id);
+    }
+    return false;
+  }
   function record(agentId: string, store: AgentSpeedStore) {
     const { turnId, endedAt, phase, provisional } = store.state;
     if (!turnId || endedAt === null || phase !== "completed" || provisional) return;
+    if (!stillVisible(agentId)) return;
     const summary = store.summary(endedAt);
     if (summary.partial) return;
     const samples = [];
@@ -172,7 +189,8 @@ export function createTurnSpeedRuntime(client: PluginClientContext) {
     updating = true;
     do {
       updateAgain = false;
-      const wanted = new Set([...watchers.keys()].filter(id => !unavailable.has(id)));
+      roots = watchedRoots();
+      const wanted = new Set(roots);
       // A descendant may itself be waiting on its own workers. Follow the transitive subtree,
       // keeping one attachment even if two open views share a worker.
       const children = new Map<string, string[]>();
@@ -234,6 +252,12 @@ export function createTurnSpeedRuntime(client: PluginClientContext) {
       calibration.load();
       sync();
       clock ??= setInterval(() => {
+        // Web retains hidden chats in a React freeze boundary, so a pill's
+        // effects can stay mounted after the focused composer changes.
+        if (supportsFocus) {
+          const focused = watchedRoots();
+          if (focused.size !== roots.size || [...focused].some(id => !roots.has(id))) sync();
+        }
         if ([...attachments.values()].some(entry => entry.store.isRunning())) notify();
       }, 500);
       return () => {

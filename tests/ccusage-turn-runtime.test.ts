@@ -100,3 +100,60 @@ test("only the watched team opens live streams, shares overlapping views and rec
     end();
   } finally { runtime.dispose(); }
 });
+
+test("a retained tab stops observing when host focus changes without React cleanup", async t => {
+  t.mock.timers.enable({ apis: ["Date", "setInterval", "setTimeout"], now: new Date("2026-11-01T00:00:00Z") });
+  const composers = new Map([["first", {}], ["second", {}]]);
+  const snapshots = new Map<string, AgentInfo>();
+  const streams = new Map<string, (message: unknown) => void>();
+  const recorded: unknown[] = [];
+  let focusedId = "first";
+  const runtime = createTurnSpeedRuntime({
+    composers: (selector: { agentId: string } | { focused: true }) => [composers.get("agentId" in selector ? selector.agentId : focusedId)],
+    paseo: { agents: { ref: (id: string) => ({
+      refresh: async () => ({ agent: snapshots.get(id) }),
+      timeline: { subscribe(listener: (message: unknown) => void) {
+        streams.set(id, listener);
+        return { ready: Promise.resolve(), release: async () => { streams.delete(id); } };
+      } },
+    }) } },
+    rpc: async (method: { name: string }, input: unknown) => {
+      if (method.name.endsWith(".record")) recorded.push(input);
+      return { recorded: true, status: "ready", revision: "1", values: { calibration: {} } };
+    },
+  } as any);
+  const event = (id: string, data: object) => streams.get(id)!({ event: data, timestamp: new Date().toISOString() });
+  try {
+    for (const id of composers.keys()) {
+      const snapshot = { id, status: "idle" };
+      snapshots.set(id, snapshot);
+      runtime.upsert(snapshot);
+      runtime.watch(id, () => {});
+    }
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual([...streams.keys()], ["first"]);
+    event("first", { type: "turn_started", turnId: "leaving" });
+    for (let chunk = 1; chunk <= 5; chunk++) {
+      t.mock.timers.tick(60);
+      event("first", { type: "timeline", turnId: "leaving", item: { type: "assistant_message", messageId: "m", text: "x".repeat(chunk * 40) } });
+    }
+    assert.ok(runtime.read("first", 5)!.summary.tokPerSecDecode! > 0);
+
+    focusedId = "second";
+    // The old effects and even its stream still exist until the next runtime poll.
+    event("first", { type: "turn_completed", turnId: "leaving", usage: { outputTokens: 50 } });
+    assert.deepEqual(recorded, []);
+    t.mock.timers.tick(500);
+    assert.deepEqual([...streams.keys()], ["second"]);
+    assert.equal(runtime.read("first", 5), null);
+
+    const running = { id: "first", status: "running", activeTurn: { turnId: "while-hidden", startedAt: new Date().toISOString() } };
+    snapshots.set(running.id, running);
+    runtime.upsert(running);
+    focusedId = "first";
+    t.mock.timers.tick(500);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual([...streams.keys()], ["first"]);
+    assert.equal(runtime.read("first", 5)!.summary.partial, true);
+  } finally { runtime.dispose(); }
+});
