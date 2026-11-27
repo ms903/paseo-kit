@@ -2,6 +2,7 @@ import v8 from "node:v8";
 import type { PluginServerContext } from "@getpaseo/plugin/server";
 import { createGpuSampler } from "./server/gpus";
 import { startSampler } from "./server/sampler";
+import { settingsDefinition } from "./shared/settings";
 import { gpuStatsRpc, hostStatsRpc } from "./shared/stats";
 
 // The plugin process validates every daemon message with one generated function of about 11 MB
@@ -13,6 +14,7 @@ import { gpuStatsRpc, hostStatsRpc } from "./shared/stats";
 v8.setFlagsFromString("--no-maglev");
 
 export default function contribute(server: PluginServerContext) {
+  server.registerSettings(settingsDefinition);
   const sampler = startSampler();
   const gpus = createGpuSampler();
   server.handle(hostStatsRpc, () => sampler.read());

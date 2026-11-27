@@ -201,7 +201,7 @@ function drawProse(block: Element, typeset: Typeset, undos: Undo[]): void {
   }
 }
 
-function drawSurface(surface: Element, typeset: Typeset, undos: Undo[]): void {
+function drawSurface(surface: Element, typeset: Typeset, undos: Undo[], tables: boolean): void {
   if (!surface.closest(ROW) || !isAssistant(surface) || surface.parentElement?.closest(SURFACE)) return;
   const blocks = Array.from(surface.children);
   for (const block of blocks) {
@@ -214,15 +214,17 @@ function drawSurface(surface: Element, typeset: Typeset, undos: Undo[]): void {
       if (formula) appendMirror(block.matches(BLOCK) ? block.firstElementChild ?? block : block, formula, undos);
       continue;
     }
-    for (const frame of block.querySelectorAll(TABLE)) drawTable(frame, typeset, undos);
+    const frames = block.querySelectorAll(TABLE);
+    if (!tables && frames.length) continue;
+    for (const frame of frames) drawTable(frame, typeset, undos);
     drawProse(block, typeset, undos);
   }
 }
 
 /** Observe only Better Paseo's mounted reply surfaces. React keeps ownership of all of its nodes. */
-export function observeBetterPaseo(document: Document, typeset: Typeset): () => void {
+export function observeBetterPaseo(document: Document, typeset: Typeset, tables: () => boolean) {
   const view = document.defaultView;
-  if (!view || !document.documentElement) return () => {};
+  if (!view || !document.documentElement) return { refresh() {}, stop() {} };
   const style = document.createElement("style");
   style.textContent = `[${SOURCE}] > :not([${OUTPUT}]) { display: none !important; }`;
   document.head.append(style);
@@ -261,7 +263,7 @@ export function observeBetterPaseo(document: Document, typeset: Typeset): () => 
         restore(surface);
         if (!surface.isConnected) continue;
         const undos: Undo[] = [];
-        try { drawSurface(surface, typeset, undos); }
+        try { drawSurface(surface, typeset, undos, tables()); }
         catch { for (const undo of undos.splice(0)) undo(); }
         if (undos.length) applied.set(surface, undos);
       }
@@ -273,11 +275,14 @@ export function observeBetterPaseo(document: Document, typeset: Typeset): () => 
   function schedule() { frame ??= view!.requestAnimationFrame(flush); }
   collect(document.documentElement);
   flush();
-  return () => {
-    observer.disconnect();
-    if (frame !== undefined) view.cancelAnimationFrame(frame);
-    for (const surface of applied.keys()) restore(surface);
-    dirty.clear();
-    style.remove();
+  return {
+    refresh() { collect(document.documentElement); schedule(); },
+    stop() {
+      observer.disconnect();
+      if (frame !== undefined) view.cancelAnimationFrame(frame);
+      for (const surface of applied.keys()) restore(surface);
+      dirty.clear();
+      style.remove();
+    },
   };
 }

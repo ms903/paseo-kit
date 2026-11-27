@@ -1,9 +1,10 @@
 import type { PluginTheme } from "@getpaseo/plugin";
-import { useAgent, useRpc, type PluginWorkspacePanelProps } from "@getpaseo/plugin/client";
+import { useAgent, useRpc, useSettings, type PluginWorkspacePanelProps } from "@getpaseo/plugin/client";
 import { FlatList, Icon, useToast } from "@getpaseo/plugin/client/react-native";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, Text, View } from "react-native";
+import { historySettings } from "../shared/settings";
 import { closedAgentsRpc, restoreAgentRpc, type ClosedAgent } from "../shared/agents";
 
 const REFRESH_MS = 5_000;
@@ -17,6 +18,7 @@ export function ClosedAgentsPanel(props: PluginWorkspacePanelProps) {
 }
 
 function WorkspaceClosedAgents({ theme, host, layout, workspaceId, navigation }: PluginWorkspacePanelProps) {
+  const settings = useSettings(historySettings);
   const listClosed = useRpc(closedAgentsRpc);
   const restore = useRpc(restoreAgentRpc);
   const toast = useToast();
@@ -44,7 +46,8 @@ function WorkspaceClosedAgents({ theme, host, layout, workspaceId, navigation }:
 
   const padding = layout.compact ? 12 : 16;
   const muted = theme.colors.foregroundMuted;
-  const agents = closed.data?.agents ?? [];
+  const limit = settings.status === "ready" ? Number(settings.values.limit) : 50;
+  const agents = closed.data?.agents.slice(0, limit) ?? [];
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.colors.surface0 }}>
@@ -56,7 +59,7 @@ function WorkspaceClosedAgents({ theme, host, layout, workspaceId, navigation }:
       </View>
       {closed.isError ? (
         <Empty theme={theme} icon="TriangleAlert" text={String(closed.error)} />
-      ) : !closed.data ? (
+      ) : !closed.data || settings.status === "loading" ? (
         <Empty theme={theme} loading text="Loading" />
       ) : agents.length === 0 ? (
         <Empty theme={theme} icon="ArchiveRestore" text="No closed agents in this workspace." />

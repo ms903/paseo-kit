@@ -35,8 +35,10 @@ async function checkCompanionNativeEntrypoint(project) {
     const sandbox = {
       module,
       require(id) {
-        assert.equal(id, "react-native");
-        return { Platform: { OS } };
+        if (id === "react-native") return { Platform: { OS } };
+        // Settings components import only host modules. They must not render on native.
+        assert.ok(["react", "react/jsx-runtime", "@getpaseo/plugin/client/ui"].includes(id), id);
+        return {};
       },
       get document() { throw new Error(`The companion accessed a DOM global on ${OS}`); },
       Function() { throw new Error(`The companion initialized the web bundle on ${OS}`); },

@@ -150,12 +150,25 @@ export function typicalDay(daily: readonly UsagePeriod[]): TypicalDay | null {
   };
 }
 
-// Okabe–Ito Color Universal Design palette.
-// https://jfly.uni-koeln.de/color/
-const AGENT_COLORS = ["#0072B2", "#D55E00", "#009E73", "#CC79A7"] as const;
+// Same Carbon series order on both themes: purple, cyan, teal, magenta.
+// https://www.ibm.com/design/language/color/
+const LIGHT_SERIES = ["#6929C4", "#0072C3", "#005D5D", "#9F1853"] as const;
+const DARK_SERIES = ["#BE95FF", "#33B1FF", "#3DDBD9", "#FF7EB6"] as const;
+
+export function chartColors(theme: PluginTheme): readonly string[] {
+  // Paseo supplies the surface itself, including when the user overrides their OS theme.
+  const surface = theme.colors.surface0;
+  const full = surface?.replace(/^#([a-f\d])([a-f\d])([a-f\d])$/i, "#$1$1$2$2$3$3");
+  const hex = /^#([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})/i.exec(full ?? "");
+  const rgb = hex ? hex.slice(1).map(channel => parseInt(channel, 16))
+    : /^rgba?\(\s*(\d+)[, ]+\s*(\d+)[, ]+\s*(\d+)/i.exec(surface ?? "")?.slice(1).map(Number);
+  if (!rgb) return LIGHT_SERIES;
+  const brightness = 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2];
+  return brightness < 128 ? DARK_SERIES : LIGHT_SERIES;
+}
 
 /** Named series before the rest fold into "Other". */
-export const MAX_NAMED_AGENTS = AGENT_COLORS.length;
+export const MAX_NAMED_AGENTS = LIGHT_SERIES.length;
 export const OTHER_AGENT = "other";
 
 export interface Swatch {
@@ -165,7 +178,7 @@ export interface Swatch {
 
 /** Use the report-wide order so charts, legends and lists agree across periods. */
 export function agentSwatch(theme: PluginTheme, agents: readonly string[], agent: string): Swatch {
-  const color = agent === OTHER_AGENT ? undefined : AGENT_COLORS[agents.indexOf(agent)];
+  const color = agent === OTHER_AGENT ? undefined : chartColors(theme)[agents.indexOf(agent)];
   return { color: color ?? theme.colors.foregroundMuted, opacity: 1 };
 }
 

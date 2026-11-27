@@ -1,7 +1,11 @@
 import v8 from "node:v8";
 import type { PluginServerContext } from "@getpaseo/plugin/server";
 import { createReportCache } from "./server/report";
+import { createSessionSpeed, emptySpeed } from "./server/session-speed";
 import { createSessionMatcher } from "./server/sessions";
+import { CCUSAGE_SETTINGS } from "./shared/settings";
+import { recordSessionSpeedRpc, sessionSpeedRpc } from "./shared/speed";
+import { turnCalibration } from "./shared/turn-calibration";
 import { sessionDetailRpc, sessionListRpc, sessionUsageRpc, updatePricesRpc, usageReportRpc } from "./shared/usage";
 
 // The plugin process validates every daemon message with one generated function of about 11 MB
@@ -15,14 +19,40 @@ v8.setFlagsFromString("--no-maglev");
 export default function contribute(server: PluginServerContext) {
   const cache = createReportCache();
   const matcher = createSessionMatcher(cache);
+  const speed = createSessionSpeed();
+  const settings = server.registerSettings(CCUSAGE_SETTINGS);
+  server.registerSettings(turnCalibration);
+  let trackSpeed = false;
+  const updateSpeed = (state: Awaited<ReturnType<typeof settings.read>>) => {
+    trackSpeed = state.status === "ready" && state.values.showSessionSpeed;
+    if (!trackSpeed) speed.clear();
+  };
+  const stopSettings = settings.subscribe(updateSpeed);
+  void settings.read().then(updateSpeed).catch(() => {});
   server.handle(usageReportRpc, ({ refresh, retry, knownRevision }) => cache.read(refresh || retry, knownRevision));
   server.handle(updatePricesRpc, () => cache.updatePrices());
   server.handle(sessionListRpc, (input) => cache.listSessions(input));
   server.handle(sessionUsageRpc, (input, { paseo }) => matcher.resolve(input, paseo));
   server.handle(sessionDetailRpc, (input, { paseo }) => matcher.detail(input, paseo));
-  // A finished turn may establish a provider session id.
-  server.on("agent.turn_ended", (event) => {
-    matcher.forget(event.agent.id);
+  server.handle(sessionSpeedRpc, async (input, { paseo }) => {
+    const state = await settings.read();
+    return state.status === "ready" && state.values.showSessionSpeed
+      ? speed.read(input, paseo) : emptySpeed;
   });
-  return () => cache.stop();
+  server.handle(recordSessionSpeedRpc, async (input) => {
+    const state = await settings.read();
+    return { recorded: state.status === "ready" && state.values.showSessionSpeed && await speed.record(input) };
+  });
+  // A finished turn may establish a provider session id.
+  server.on("agent.turn_ended", (event, { paseo }) => {
+    matcher.forget(event.agent.id);
+    if (trackSpeed && event.outcome.kind === "completed") {
+      void speed.complete(paseo, event.agent.id, event.turnId).catch(() => {});
+    }
+  });
+  return async () => {
+    await stopSettings?.();
+    cache.stop();
+    await speed.stop();
+  };
 }

@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Pressable, Text, View, type PressableStateCallbackType, type TextStyle, type ViewStyle } from "react-native";
 import type { ModelUsage, TodayPreview, Usage, UsagePeriod, UsageView } from "../shared/usage";
 import { ShareBar, SwatchDot, type ShareSegment } from "./charts";
-import { agentSwatch, foldAgents } from "./data";
+import { agentSwatch, chartColors, foldAgents } from "./data";
 import {
   agentLabel,
   formatCost,
@@ -112,30 +112,31 @@ export function TokenChange({
 }
 
 export function Composition({ theme, usage }: { theme: PluginTheme; usage: Usage }) {
+  const colors = chartColors(theme);
   const parts: (ShareSegment & { label: string })[] = [
     {
       key: "input",
       label: "Input",
       value: usage.inputTokens,
-      swatch: { color: theme.colors.accent, opacity: 1 },
+      swatch: { color: colors[0], opacity: 1 },
     },
     {
       key: "output",
       label: "Output",
       value: usage.outputTokens,
-      swatch: { color: theme.colors.accent, opacity: 0.5 },
+      swatch: { color: colors[1], opacity: 1 },
     },
     {
       key: "cache-write",
       label: "Cache write",
       value: usage.cacheCreationTokens,
-      swatch: { color: theme.colors.foregroundMuted, opacity: 0.9 },
+      swatch: { color: colors[2], opacity: 1 },
     },
     {
       key: "cache-read",
       label: "Cache read",
       value: usage.cacheReadTokens,
-      swatch: { color: theme.colors.foregroundMuted, opacity: 0.45 },
+      swatch: { color: colors[3], opacity: 1 },
     },
   ];
   const total = Math.max(usage.totalTokens, 1);

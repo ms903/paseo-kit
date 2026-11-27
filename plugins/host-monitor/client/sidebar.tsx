@@ -1,5 +1,5 @@
 import type { PluginTheme, RpcOutput } from "@getpaseo/plugin";
-import type { PluginHostProps, PluginPopoverProps, PluginScreenProps, PluginSidebarItemProps } from "@getpaseo/plugin/client";
+import { useSettings, type PluginHostProps, type PluginPopoverProps, type PluginScreenProps, type PluginSidebarItemProps } from "@getpaseo/plugin/client";
 import { Icon } from "@getpaseo/plugin/client/react-native";
 import { useCallback, useState, type ReactNode } from "react";
 import {
@@ -12,6 +12,7 @@ import {
   type TextStyle,
   type ViewStyle,
 } from "react-native";
+import { defaults, footerMetrics, settingsDefinition, type MetricKey, type MonitorSettings } from "../shared/settings";
 import type { GpuUsage, hostStatsRpc } from "../shared/stats";
 import { formatBytes, formatCompactRate, formatPercent, formatRate, formatUptime, gpuSummary } from "./format";
 import { GpuSection } from "./gpus";
@@ -46,8 +47,6 @@ const PAIR_SEPARATOR_WIDTH = 8;
 export const HOST_MONITOR_SCREEN_ID = "host-monitor";
 
 type HostStats = RpcOutput<typeof hostStatsRpc>;
-
-type MetricKey = "cpu" | "memory" | "gpu" | "disk" | "network";
 
 /** Which metrics fit, and whether the percentages get meters. */
 interface LineLayout {
@@ -233,19 +232,18 @@ function triggerStyle(theme: PluginTheme) {
   });
 }
 
-function describe(hostLabel: string, stats: HostStats, gpu: ReturnType<typeof gpuSummary>): string {
+function describe(hostLabel: string, stats: HostStats, gpu: ReturnType<typeof gpuSummary>, settings: MonitorSettings): string {
   const { current, memory, network, disks } = stats;
-  const parts = [
-    `CPU ${formatPercent(current.cpuPercent)}`,
-    `memory ${formatPercent(memoryPercent(memory))}`,
-  ];
-  if (memory.pressure) parts.push(`memory pressure ${memory.pressure}`);
-  if (gpu) parts.push(gpu.description);
-  if (disks.length > 0) {
+  const parts: string[] = [];
+  if (settings.cpu) parts.push(`CPU ${formatPercent(current.cpuPercent)}`);
+  if (settings.memory) parts.push(`memory ${formatPercent(memoryPercent(memory))}`);
+  if (settings.memory && memory.pressure) parts.push(`memory pressure ${memory.pressure}`);
+  if (settings.gpu && gpu) parts.push(gpu.description);
+  if (settings.disk && disks.length > 0) {
     const disk = sumDisks(disks);
     parts.push(`disk ${formatPercent(disk.percent)}, ${formatBytes(disk.availableBytes)} available`);
   }
-  if (network) {
+  if (settings.network && network) {
     parts.push(
       `download ${formatRate(current.rxBytesPerSec)}`,
       `upload ${formatRate(current.txBytesPerSec)}`,
@@ -259,8 +257,12 @@ function layoutWidth(event: LayoutChangeEvent): number {
 }
 
 export function HostStatusItem({ theme, host, openPopover }: PluginSidebarItemProps) {
-  const { data } = useHostStats(host.id);
-  const { data: gpus } = useHostGpus(host.id);
+  const preferences = useSettings(settingsDefinition);
+  const settings = preferences.status === "ready" ? preferences.values : defaults;
+  const refreshMs = Number(settings.refreshSeconds) * 1000;
+  const visible = preferences.status !== "loading" && footerMetrics.some(key => settings[key]);
+  const { data } = useHostStats(host.id, refreshMs, visible);
+  const { data: gpus } = useHostGpus(host.id, refreshMs, visible && settings.gpu);
   const [available, setAvailable] = useState<number | null>(null);
   const [measuredSlot, setMeasuredSlot] = useState<number | null>(null);
   const onAvailable = useCallback((e: LayoutChangeEvent) => setAvailable(layoutWidth(e)), []);
@@ -270,16 +272,17 @@ export function HostStatusItem({ theme, host, openPopover }: PluginSidebarItemPr
   }, []);
 
   // Like the built-in usage summary: nothing until there is something to show.
-  if (!data) return null;
-  const gpu = gpuSummary(gpus);
-  const metrics = metricsOf(data, gpu);
+  if (!visible || !data) return null;
+  const gpu = settings.gpu ? gpuSummary(gpus) : null;
+  const metrics = metricsOf(data, gpu).filter(metric => settings[metric.key]);
+  if (!metrics.length) return null;
   const slotWidth = measuredSlot ?? ESTIMATED_SLOT_WIDTH;
   const layout = chooseLayout(available, metrics, slotWidth);
 
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={describe(host.label, data, gpu)}
+      accessibilityLabel={describe(host.label, data, gpu, settings)}
       onPress={() => openPopover(HostPopover)}
       style={triggerStyle(theme)}
     >
@@ -451,8 +454,11 @@ function HostMetrics({ theme, data, gpus }: { theme: PluginTheme; data: HostStat
 }
 
 function HostDetails({ theme, host, action }: Pick<PluginHostProps, "theme" | "host"> & { action?: ReactNode }) {
-  const { data, isError } = useHostStats(host.id);
-  const { data: gpus } = useHostGpus(host.id);
+  const preferences = useSettings(settingsDefinition);
+  const seconds = preferences.status === "ready" ? preferences.values.refreshSeconds : defaults.refreshSeconds;
+  const refreshMs = Number(seconds) * 1000;
+  const { data, isError } = useHostStats(host.id, refreshMs);
+  const { data: gpus } = useHostGpus(host.id, refreshMs);
 
   return (
     <>

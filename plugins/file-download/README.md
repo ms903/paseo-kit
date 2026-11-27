@@ -7,7 +7,7 @@ See [OVERVIEW.md](OVERVIEW.md) for what it does, how it works and its limits.
 ## Install
 
 ```bash
-paseo plugin install github:ms903/paseo-kit:plugins/file-download
+paseo plugin install git:ms903/paseo-kit:plugins/file-download
 ```
 
 Or from a local clone of [paseo-kit](../../README.md):
@@ -19,7 +19,11 @@ paseo plugin install "$PWD"
 
 Requires Paseo 0.11.1 or later with plugins enabled on the daemon.
 
-Version 0.1.0 targets the Paseo 0.18.1 plugin SDK. It keeps the `file-download` plugin ID for existing installations. To update a Git installation from the same source, run `paseo plugin update file-download --yes`.
+Version 0.1.1 targets the Paseo 0.18.1 plugin SDK. It keeps the `file-download` plugin ID for existing installations. To update a Git installation from the same source, run `paseo plugin update file-download --yes`.
+
+## Settings
+
+Open **Settings → Plugins → Download file → Downloads** to change **Download with Ctrl+S or ⌘S**. The shortcut is enabled by default. Turning it off leaves **Download current file** available in the Command Center and lets the browser or editor handle the key.
 
 ## Develop
 

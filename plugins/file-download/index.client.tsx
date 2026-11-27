@@ -1,11 +1,14 @@
 import type { PluginClientContext } from "@getpaseo/plugin/client";
 import { createHostCheck, downloadFile, downloadFocusedFile, NOT_A_FILE } from "./client/downloads";
 import { createHistoryPanel } from "./client/history-panel";
+import { DownloadSettingsScreen } from "./client/settings-screen";
+import { watchSaveShortcut } from "./client/shortcut-settings";
 import { NoticeHost } from "./client/notice-host";
 import { listenForSaveShortcut, readFocusedTab } from "./client/web";
 
 export default function contribute(client: PluginClientContext) {
   const ownsServer = createHostCheck(client.rpc);
+  client.addSettingsScreen({ id: "downloads", title: "Downloads", icon: "Download", Component: DownloadSettingsScreen });
 
   client.addCommandCenterItem({
     id: "download-current-file",
@@ -41,7 +44,7 @@ export default function contribute(client: PluginClientContext) {
   });
   client.addSidebarFooterItem({ id: "notices", title: "Download notices", Component: NoticeHost });
 
-  return listenForSaveShortcut((event) => {
+  return watchSaveShortcut(client, () => listenForSaveShortcut((event) => {
     if (downloadFocusedFile(client.rpc, ownsServer)) event.preventDefault();
-  });
+  }));
 }

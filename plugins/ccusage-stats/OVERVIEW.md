@@ -6,7 +6,13 @@ A line in the sidebar footer, styled like the built-in usage summary, shows toda
 
 Press the line for a popover. Switch between day, week and month to see the current period's total, the change against the previous one, and a stacked column chart of recent periods. Press a column to inspect that period. Below the chart, each agent's tokens, share and cost are listed. **Details** opens a full screen with longer history (30 days, 12 weeks or 12 months), cost per million tokens, cache hit rate, the input, output and cache split, a per-agent list that expands into models, and the most recent sessions. The screen is also in the Command Center as **Open token usage**.
 
-Each agent's composer gets a pill with the token total of that agent's current session once usage is recorded. Press it for the session's cost, token split and models.
+Open **Token Usage** in an agent’s composer for session tokens, estimated cost, cache hit rate, context, and output speed. On current Paseo the same button shows the speed of the focused conversation during a turn and returns to the session’s token count afterwards. Its details distinguish model output, tool or permission waits, and work delegated to child agents. On older clients without a focused-composer API, opening the panel starts live observation.
+
+**Settings → the host → Plugins → Token usage** controls speed visibility, the composer reading (live, average decode, or whole turn excluding waits), and the live window (3, 5, 10 or 30 seconds). The defaults are on, live, and 5 seconds.
+
+A live stream can show an estimated rate before the provider reports token counts. The **≈** sign identifies those estimates. Turn details can show time to first token, reasoning, tools and subagent activity when observed. Opening a session in the report shows available per-turn measurements from the provider or a completed turn the client observed. An old session with neither source displays an unavailable state. History stays scoped to the selected provider session when the same Paseo agent changes sessions.
+
+The live meter uses Drenalol’s MIT-licensed Turn Speed implementation. [Upstream](https://github.com/Drenalol/paseo-turn-speed) · [MIT license and copyright](client/turn-speed/LICENSE)
 
 ## How sessions are matched
 

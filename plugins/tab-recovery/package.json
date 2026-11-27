@@ -1,7 +1,7 @@
 {
   "name": "tab-recovery",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Reopen agent tabs that were closed by accident",
   "license": "Apache-2.0",
   "repository": {

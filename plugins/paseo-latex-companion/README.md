@@ -14,9 +14,15 @@ paseo plugin install git:ms903/paseo-kit:plugins/paseo-latex-companion
 
 ![Paseo 0.18 网页端与 Better Paseo 1.7.0 同时启用时的表格公式](preview.png)
 
+## 公式显示设置
+
+打开 **设置 → 当前主机 → 插件 → LaTeX Companion for Better Paseo**。公式字号可选 100%、110%、125% 和 150%，默认 100%。关闭 **排版表格中的公式** 会恢复 Better Paseo 的原始表格，正文里的公式继续排版。
+
+这两个阅读偏好保存在当前浏览器或桌面客户端，同一客户端打开的其他标签页也会更新。不同设备可以使用各自的字号。
+
 ## 使用 ZIP 安装
 
-从 [v1.0.0 Release](https://github.com/ms903/paseo-kit/releases/tag/paseo-latex-companion-v1.0.0) 下载插件 ZIP。
+从 [v1.1.0 Release](https://github.com/ms903/paseo-kit/releases/tag/paseo-latex-companion-v1.1.0) 下载插件 ZIP。
 
 1. 将 ZIP 解压到运行 **Paseo 守护进程** 的机器上，保留解压目录。如果连接的是 WSL 或远程主机，请使用那台主机上的目录。
 2. 在该主机的 **设置 → 插件 → 插件来源** 中填入包含 `paseo-plugin.json` 的目录绝对路径，点击安装。也可在终端执行 `paseo plugin install "目录的绝对路径"`。预构建包可以直接安装，无需运行 npm。

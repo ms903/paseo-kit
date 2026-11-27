@@ -24,8 +24,12 @@ export function SettingsScreen({ theme }: PluginSurfaceProps) {
   const [checks, setChecks] = useState<Record<string, string>>({});
   const { colors } = theme;
 
+  if (settings.status === "loading") return <Text style={{ color: colors.foregroundMuted }}>{t("viewer.loading")}</Text>;
   if (settings.status !== "ready") {
-    return <Text style={{ color: colors.foregroundMuted }}>{settings.status === "loading" ? t("viewer.loading") : settings.error}</Text>;
+    const invalid = settings.status === "invalid";
+    return <SettingsCard><SettingsAction label={settings.saveError ?? settings.error}
+      actionLabel={invalid ? t("settings.restoreDefaults") : t("settings.reload")} disabled={settings.saving}
+      onPress={() => { void (invalid ? settings.reset() : settings.reload()); }} /></SettingsCard>;
   }
   const values = settings.values;
   const save = (patch: Partial<MediaStudioSettings>) => void settings.save({ ...values, ...patch }, settings.revision);
@@ -36,6 +40,7 @@ export function SettingsScreen({ theme }: PluginSurfaceProps) {
       hint={hint}
       initialValue={values[key]}
       placeholder={placeholder}
+      disabled={settings.saving}
       onChangeText={(text) => setDrafts((current) => ({ ...current, [key]: text }))}
     />
   );
@@ -48,6 +53,8 @@ export function SettingsScreen({ theme }: PluginSurfaceProps) {
 
   return (
     <View style={{ gap: 24 }}>
+      {settings.saveError && <SettingsAction label={settings.saveError} actionLabel={t("settings.reload")}
+        onPress={() => { void settings.reload(); }} />}
       <SettingsSection title={t("settings.storageTitle")}>
         <SettingsCard>
           <SettingsRow label={t("settings.cache")} hint={`${((storage.data?.cacheBytes ?? 0) / 1024 ** 2).toFixed(1)} MiB / 1024 MiB`} />
@@ -82,9 +89,9 @@ export function SettingsScreen({ theme }: PluginSurfaceProps) {
 
       <SettingsSection title={t("settings.agentsTitle")}>
         <SettingsCard>
-          <SettingsSwitch label={t("settings.agentTool")} hint={t("settings.agentToolHint")} value={values.agentTool} onValueChange={(agentTool) => save({ agentTool })} />
-          <SettingsSwitch label={t("settings.turnCards")} hint={t("settings.turnCardsHint")} value={values.turnCards} onValueChange={(turnCards) => save({ turnCards })} />
-          <SettingsSwitch label={t("settings.composerPill")} hint={t("settings.composerPillHint")} value={values.composerPill} onValueChange={(composerPill) => save({ composerPill })} />
+          <SettingsSwitch label={t("settings.agentTool")} hint={t("settings.agentToolHint")} value={values.agentTool} disabled={settings.saving} onValueChange={(agentTool) => save({ agentTool })} />
+          <SettingsSwitch label={t("settings.turnCards")} hint={t("settings.turnCardsHint")} value={values.turnCards} disabled={settings.saving} onValueChange={(turnCards) => save({ turnCards })} />
+          <SettingsSwitch label={t("settings.composerPill")} hint={t("settings.composerPillHint")} value={values.composerPill} disabled={settings.saving} onValueChange={(composerPill) => save({ composerPill })} />
         </SettingsCard>
       </SettingsSection>
 
@@ -94,6 +101,7 @@ export function SettingsScreen({ theme }: PluginSurfaceProps) {
             label={t("settings.quality")}
             hint={t("settings.qualityHint")}
             value={values.quality}
+            disabled={settings.saving}
             options={(["auto", "original", "1080", "720", "480"] as const).map((value) => ({ value, label: t(`quality.${value}`) }))}
             onValueChange={(quality) => save({ quality })}
           />
@@ -101,6 +109,7 @@ export function SettingsScreen({ theme }: PluginSurfaceProps) {
             label={t("settings.hardware")}
             hint={t("settings.hardwareHint")}
             value={values.hardwareEncoding}
+            disabled={settings.saving}
             onValueChange={(hardwareEncoding) => save({ hardwareEncoding })}
           />
         </SettingsCard>
@@ -116,7 +125,7 @@ export function SettingsScreen({ theme }: PluginSurfaceProps) {
           {textRow("ffmpegPath", t("settings.ffmpegPath"), t("settings.ffmpegPathHint"), "/opt/homebrew/bin/ffmpeg")}
           {textRow("ffprobePath", t("settings.ffprobePath"), t("settings.ffmpegPathHint"), "/opt/homebrew/bin/ffprobe")}
           <SettingsAction
-            label={settings.saveError ?? t("settings.saveHint")}
+            label={t("settings.saveHint")}
             actionLabel={t("settings.save")}
             disabled={!dirty || settings.saving}
             onPress={() => {

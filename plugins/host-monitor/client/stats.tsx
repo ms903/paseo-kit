@@ -15,25 +15,25 @@ import {
   type MemoryUsage,
 } from "../shared/stats";
 
-const REFRESH_MS = 2000;
-
-export function useHostStats(hostId: string) {
+export function useHostStats(hostId: string, refreshMs: number, enabled = true) {
   const getStats = useRpc(hostStatsRpc);
   return useQuery({
     queryKey: ["host-stats", hostId],
     queryFn: () => getStats({}),
-    staleTime: REFRESH_MS,
-    refetchInterval: REFRESH_MS,
+    enabled,
+    staleTime: refreshMs,
+    refetchInterval: refreshMs,
   });
 }
 
-export function useHostGpus(hostId: string) {
+export function useHostGpus(hostId: string, refreshMs: number, enabled = true) {
   const getGpus = useRpc(gpuStatsRpc);
   return useQuery({
     queryKey: ["host-gpus", hostId],
     queryFn: () => getGpus({}),
-    staleTime: (query) => query.state.data?.length === 0 ? GPU_RECHECK_MS : GPU_REFRESH_MS,
-    refetchInterval: (query) => query.state.data?.length ? GPU_REFRESH_MS : GPU_RECHECK_MS,
+    enabled,
+    staleTime: (query) => query.state.data?.length === 0 ? GPU_RECHECK_MS : Math.max(refreshMs, GPU_REFRESH_MS),
+    refetchInterval: (query) => query.state.data?.length ? Math.max(refreshMs, GPU_REFRESH_MS) : GPU_RECHECK_MS,
     retry: false,
   });
 }

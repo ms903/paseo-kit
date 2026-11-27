@@ -1,5 +1,17 @@
 # 更新记录
 
+## 会话速度与插件设置
+
+| 插件 | 版本 | 更新 |
+| --- | --- | --- |
+| ccusage-stats | 0.1.0 | 在会话的 Token Usage 弹窗及历史详情内查看输出速度，区分实际用量和估算。可关闭速度显示，或调整实时窗口。 |
+| heartbeat-status | 0.1.1 | 会话标签及空闲工作区状态点使用 Carbon 青绿细线时钟，长针连续匀速转动。新增颜色、动画设置，遵循系统“减少动态效果”。 |
+| host-monitor | 0.1.0 | 在设置中选择侧栏指标与刷新间隔，全部隐藏时停止侧栏采样。 |
+| tab-recovery | 0.1.1 | 选择每个工作区列出的已关闭 agent 数量。 |
+| file-download | 0.1.1 | 可独立关闭 Ctrl+S 或 Cmd+S 下载快捷键。 |
+| media-studio | 0.1.1 | 输入框媒体提示实时响应主机设置。 |
+| paseo-latex-companion | 1.1.0 | 可在当前客户端调整公式字号和表格公式排版。兼容官方 Better Paseo 1.7.0。 |
+
 ## Heartbeat Status 0.1.0
 
 新增独立插件，在网页和桌面端的 agent 标签、工作区侧栏标出启用中的心跳。子 agent 和更深层后代的心跳也会标记父会话。需要 Paseo 0.18.1 或更高版本。[安装和使用](plugins/heartbeat-status)

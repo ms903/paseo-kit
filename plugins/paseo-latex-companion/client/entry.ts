@@ -1,10 +1,18 @@
+import type { PluginClientContext } from "@getpaseo/plugin/client";
+import { createElement } from "react";
 import { Platform } from "react-native";
+import type { Companion } from "./preferences";
+import { FormulaSettings } from "./preferences-screen";
 
-export default function contribute(): () => void {
+export default function contribute(client: PluginClientContext): () => void {
   if (Platform.OS !== "web" || typeof document === "undefined") return () => {};
-  // The web bundle is evaluated only in a browser. Native clients connected
-  // to this daemon do not need a DOM or a compatible browser regex engine.
-  return startWebCompanion(document);
+  const companion = startWebCompanion(document);
+  const isChinese = () => client.i18n?.locale?.startsWith("zh") ?? false;
+  const unregister = client.addSettingsScreen({
+    id: "formulas", icon: "Sigma", title: isChinese() ? "公式显示" : "Formula display",
+    Component: () => createElement(FormulaSettings, { companion, chinese: isChinese() }),
+  });
+  return () => { unregister(); companion.stop(); };
 }
 
-declare function startWebCompanion(document: Document): () => void;
+declare function startWebCompanion(document: Document): Companion;

@@ -1,7 +1,7 @@
 {
   "name": "file-download",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Download the file you are previewing with Cmd+S or Ctrl+S, including files outside the workspace",
   "license": "Apache-2.0",
   "repository": {

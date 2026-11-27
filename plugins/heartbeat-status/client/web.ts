@@ -1,9 +1,11 @@
 /// <reference lib="dom" />
 import { Platform } from "react-native";
 import type { HeartbeatSummary } from "../shared/heartbeat";
+import { accentColors, defaults, type HeartbeatSettings } from "../shared/settings";
 
 export interface WebDecoration {
   update(rows: readonly HeartbeatSummary[]): void;
+  setSettings(value: HeartbeatSettings): void;
   mountWorkspace(workspaceId: string): () => void;
   isWorkspaceDecorated(workspaceId: string): boolean;
   isAgentDecorated(agentId: string): boolean;
@@ -14,6 +16,7 @@ export interface WebDecoration {
 const noOp = () => {};
 const unavailable: WebDecoration = {
   update: noOp,
+  setSettings: noOp,
   mountWorkspace: () => noOp,
   isWorkspaceDecorated: () => false,
   isAgentDecorated: () => false,
@@ -45,33 +48,129 @@ function workspaceOnScreen(hostId: string): string | null {
   }
 }
 
-function heart(anchor: Element, surface: "sidebar" | "tab"): HTMLSpanElement {
-  const node = document.createElement("span");
-  node.dataset.paseoHeartbeat = surface;
-  node.setAttribute("role", "img");
-  node.textContent = "♥︎";
-  // One non-interactive glyph. Keep the native icon, label, drag handle and keyboard targets.
-  node.style.cssText = "display:inline-block;align-self:flex-start;flex:none;white-space:nowrap;" +
-    "user-select:none;color:#ce416e;font:bold 13px/20px system-ui,sans-serif;";
-  if (surface === "tab") {
-    node.style.alignSelf = "center";
-    node.style.lineHeight = "1";
-  } else {
-    node.style.marginInline = "-3px";
+type Placement = "tab" | "idle" | "adjacent";
+
+const CLOCK_STYLES = `
+${Object.entries(accentColors).map(([name, ink]) =>
+  `[data-paseo-heartbeat-accent="${name}"] { --heartbeat-light: ${ink.light}; --heartbeat-dark: ${ink.dark}; }`
+).join("\n")}
+[data-paseo-heartbeat] {
+  color: var(--heartbeat-light);
+  position: relative;
+  display: inline-block;
+  flex: 0 0 auto;
+  width: 12px;
+  height: 12px;
+  align-self: center;
+  user-select: none;
+}
+[data-paseo-heartbeat]::before,
+[data-paseo-heartbeat]::after {
+  content: "";
+  position: absolute;
+  box-sizing: border-box;
+}
+[data-paseo-heartbeat]::before {
+  inset: 0.5px;
+  border: 1.25px solid currentColor;
+  border-radius: 50%;
+}
+/* The dial and hour hand stay still. The longer minute hand pivots around their centre. */
+[data-paseo-heartbeat]::after {
+  left: 5.5px;
+  top: 5.5px;
+  width: 3.25px;
+  height: 1px;
+  border-radius: 1px;
+  background: currentColor;
+}
+[data-paseo-heartbeat] > [data-paseo-heartbeat-minute] {
+  position: absolute;
+  left: 5.4px;
+  top: 2.25px;
+  width: 1.2px;
+  height: 4.35px;
+  border-radius: 1px;
+  background: currentColor;
+  transform-origin: 50% 3.75px;
+}
+@keyframes paseo-heartbeat-minute-sweep {
+  from { transform: rotate(0turn); }
+  to { transform: rotate(1turn); }
+}
+@media (prefers-reduced-motion: no-preference) {
+  [data-paseo-heartbeat]:not([data-paseo-heartbeat-static]) > [data-paseo-heartbeat-minute],
+  [data-testid="paseo-heartbeat-fallback-hand"] {
+    animation: paseo-heartbeat-minute-sweep 6s linear infinite;
   }
-  anchor.after(node);
-  return node;
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-paseo-heartbeat] > [data-paseo-heartbeat-minute],
+  [data-testid="paseo-heartbeat-fallback-hand"] { animation: none; }
+}
+/* Paseo measures title text before plugins mount. Its 8px padding on both sides
+   gives this chip 16px of additional content space for the dial and native 4px gap. */
+[data-testid^="workspace-tab-agent_"]:has([data-paseo-heartbeat-wide]) { box-sizing: content-box; }
+[data-paseo-heartbeat-placement="adjacent"] {
+  align-self: flex-start;
+  margin-block-start: 4px;
+  margin-inline: -3px;
+}
+[data-paseo-heartbeat-placement="idle"] { display: none; }
+/* Preserve React's idle dot so toggling the preference or changing status restores it immediately. */
+[data-testid="workspace-status-indicator-done"]:has(> [data-paseo-heartbeat-placement="idle"]) > :first-child:not([data-paseo-heartbeat]) { visibility: hidden; }
+[data-testid="workspace-status-indicator-done"] > [data-paseo-heartbeat-placement="idle"] {
+  display: block;
+  position: absolute;
+  inset: 0;
+  margin: auto;
+}
+/* Paseo's explicit theme is a root class. Its System option follows the OS. */
+html.dark [data-paseo-heartbeat] { color: var(--heartbeat-dark); }
+@media (prefers-color-scheme: dark) {
+  html:not(.light) [data-paseo-heartbeat] { color: var(--heartbeat-dark); }
+}
+@media (forced-colors: active) {
+  [data-paseo-heartbeat] { color: ButtonText !important; }
+}
+`;
+
+/** Keep the full native title when its tab strip has room for the additional glyphs. */
+function sizeTabClocks(scroll: Element, tabs: HTMLSpanElement[]): void {
+  const add = scroll.querySelector('[data-testid="workspace-new-tab-button"]');
+  const bounds = scroll.getBoundingClientRect();
+  const end = add?.getBoundingClientRect();
+  const remaining = !end ? 0 : getComputedStyle(scroll).direction === "rtl"
+    ? end.left - bounds.left : bounds.right - end.right;
+  const alreadyAdded = scroll.querySelectorAll("[data-paseo-heartbeat-wide]").length * 16;
+  const roomy = !!end && scroll.scrollWidth <= scroll.clientWidth + 1 &&
+    remaining + alreadyAdded >= tabs.length * 16 + 4;
+  for (const tab of tabs) {
+    if (tab.hasAttribute("data-paseo-heartbeat-wide") !== roomy) tab.toggleAttribute("data-paseo-heartbeat-wide", roomy);
+  }
 }
 
 /** Decorate this client's native tab strip and sidebar without changing either React component. */
 export function decorateWeb(hostId: string, locale = () => document.documentElement.lang || navigator.language): WebDecoration {
   if (Platform.OS !== "web" || typeof document === "undefined" || typeof MutationObserver === "undefined") return unavailable;
 
+  const style = document.createElement("style");
+  style.dataset.paseoHeartbeatStyles = "";
+  style.textContent = CLOCK_STYLES;
+  document.head.appendChild(style);
+
   const activeAgents = new Map<string, HeartbeatSummary>();
   const workspaceRows = new Map<string, HeartbeatSummary[]>();
   const mountedWorkspaces = new Map<string, number>();
+  let appearance = defaults;
   const marks = new Map<Element, HTMLSpanElement>();
+  function applyAppearance(marker: HTMLSpanElement) {
+    marker.dataset.paseoHeartbeatAccent = appearance.accent;
+    marker.toggleAttribute("data-paseo-heartbeat-static", !appearance.animate);
+  }
   const listeners = new Set<() => void>();
+  const observedStrips = new Set<Element>();
+  const layoutObserver = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(schedule);
   let shownWorkspaces = new Set<string>();
   let shownAgents = new Set<string>();
   let pending: number | null = null;
@@ -82,18 +181,32 @@ export function decorateWeb(hostId: string, locale = () => document.documentElem
     const nextMarks = new Set<Element>();
     const workspaces = new Set<string>();
     const agents = new Set<string>();
-    function mark(anchor: Element, surface: "sidebar" | "tab", label: string) {
+    const strips = new Map<Element, HTMLSpanElement[]>();
+    function mark(anchor: Element, placement: Placement, label: string) {
       let node = marks.get(anchor);
-      if (!node || !node.isConnected || node.previousElementSibling !== anchor) {
-        node?.remove();
-        node = heart(anchor, surface);
+      if (!node) {
+        node = document.createElement("span");
+        node.setAttribute("role", "img");
+        applyAppearance(node);
+        node.dataset.paseoHeartbeat = placement === "tab" ? "tab" : "sidebar";
+        const minute = document.createElement("span");
+        minute.dataset.paseoHeartbeatMinute = "";
+        minute.setAttribute("aria-hidden", "true");
+        node.appendChild(minute);
         marks.set(anchor, node);
+      }
+      if (node.dataset.paseoHeartbeatPlacement !== placement) node.dataset.paseoHeartbeatPlacement = placement;
+      if (placement === "idle") {
+        if (node.parentElement !== anchor) anchor.appendChild(node);
+      } else if (node.previousElementSibling !== anchor || node.parentElement !== anchor.parentElement) {
+        anchor.after(node);
       }
       if (node.title !== label) {
         node.title = label;
         node.setAttribute("aria-label", label);
       }
       nextMarks.add(anchor);
+      return node;
     }
 
     if (activeAgents.size) {
@@ -106,7 +219,8 @@ export function decorateWeb(hostId: string, locale = () => document.documentElem
         if (!rows || !mountedWorkspaces.has(workspaceId)) continue;
         const leading = row.querySelector('[data-testid^="workspace-status-indicator-"],[data-testid^="sidebar-row-project-icon-"]');
         if (leading) {
-          mark(leading, "sidebar", rows.map(row => labelFor(row, locale())).join("\n"));
+          const placement = leading.getAttribute("data-testid") === "workspace-status-indicator-done" ? "idle" : "adjacent";
+          mark(leading, placement, rows.map(row => labelFor(row, locale())).join("\n"));
           workspaces.add(workspaceId);
         }
       }
@@ -116,9 +230,16 @@ export function decorateWeb(hostId: string, locale = () => document.documentElem
           const id = (tab.getAttribute("data-testid") ?? "").slice(TAB_ID.length);
           const agent = activeAgents.get(id);
           if (agent?.workspaceId !== workspaceId || !visible(tab)) continue;
-          const icon = tab.querySelector("[data-status-bucket]")?.firstElementChild;
-          if (icon) {
-            mark(icon, "tab", labelFor(agent, locale()));
+          // The host draws the icon, title and optional modified dot in this order.
+          const title = tab.querySelector("[data-status-bucket]")?.children[1];
+          if (title?.textContent?.trim() && !title.hasAttribute("data-paseo-heartbeat")) {
+            const dial = mark(title, "tab", labelFor(agent, locale()));
+            const scroll = tab.closest('[data-testid="workspace-tabs-scroll"]');
+            if (scroll) {
+              const clocks = strips.get(scroll) ?? [];
+              clocks.push(dial);
+              strips.set(scroll, clocks);
+            }
             agents.add(id);
           }
         }
@@ -129,6 +250,19 @@ export function decorateWeb(hostId: string, locale = () => document.documentElem
         marker.remove();
         marks.delete(anchor);
       }
+    }
+    for (const strip of observedStrips) {
+      if (!strips.has(strip)) {
+        layoutObserver?.unobserve(strip);
+        observedStrips.delete(strip);
+      }
+    }
+    for (const [strip, clocks] of strips) {
+      if (!observedStrips.has(strip)) {
+        layoutObserver?.observe(strip);
+        observedStrips.add(strip);
+      }
+      sizeTabClocks(strip, clocks);
     }
     const changed = !sameIds(shownWorkspaces, workspaces) || !sameIds(shownAgents, agents);
     shownWorkspaces = workspaces;
@@ -163,6 +297,11 @@ export function decorateWeb(hostId: string, locale = () => document.documentElem
   window.addEventListener("resize", schedule);
 
   return {
+    setSettings(value) {
+      if (disposed || (appearance.accent === value.accent && appearance.animate === value.animate)) return;
+      appearance = value;
+      for (const marker of marks.values()) applyAppearance(marker);
+    },
     update(rows) {
       if (disposed) return;
       activeAgents.clear();
@@ -196,11 +335,14 @@ export function decorateWeb(hostId: string, locale = () => document.documentElem
     dispose() {
       disposed = true;
       observer.disconnect();
+      layoutObserver?.disconnect();
+      observedStrips.clear();
       navigation?.removeEventListener("currententrychange", schedule);
       window.removeEventListener("popstate", schedule);
       window.removeEventListener("resize", schedule);
       if (pending !== null) window.cancelAnimationFrame(pending);
       for (const marker of marks.values()) marker.remove();
+      style.remove();
       marks.clear();
       listeners.clear();
       shownAgents.clear();

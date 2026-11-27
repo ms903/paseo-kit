@@ -2,6 +2,11 @@
 
 Token usage and estimated cost of your coding agents, powered by ccusage.
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="preview/session-dark.png">
+  <img src="preview/session-light.png" width="292" alt="Token Usage popover showing session token totals and estimated live output speed">
+</picture>
+
 See [OVERVIEW.md](OVERVIEW.md) for what it shows, how it works and its limits.
 
 ## Install

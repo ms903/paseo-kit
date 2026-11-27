@@ -21,7 +21,23 @@ cd plugins/media-studio && npm ci
 paseo plugin install "$PWD"
 ```
 
-Media Studio 0.1.0 targets the Paseo 0.18.1 SDK and retains the Paseo 0.15.3 minimum for the daemon and app. Enable plugins and install ffmpeg on the daemon host for media previews. On Windows, put the directory containing `ffmpeg.exe` and `ffprobe.exe` on the daemon’s PATH or enter their full paths in Media Studio settings.
+Media Studio 0.1.1 targets the Paseo 0.18.1 SDK and retains the Paseo 0.15.3 minimum for the daemon and app. Enable plugins and install ffmpeg on the daemon host for media previews. On Windows, put the directory containing `ffmpeg.exe` and `ffprobe.exe` on the daemon’s PATH or enter their full paths in Media Studio settings.
+
+## Settings
+
+Open **Settings → Plugins → Media studio** for the daemon you want to configure. Switches and the playback quality selector save immediately. Choose **Save** after editing the text fields.
+
+| Option | Default |
+| --- | --- |
+| Agent preview tool | On for Claude, Codex and OpenCode |
+| Media summary after a turn / composer media count | Both off |
+| Playback quality | Auto, with original, 1080p, 720p and 480p alternatives |
+| Hardware video encoding | On when available |
+| Upload folder / saved frames folder | `uploads` / `.media-studio/frames`, relative to the workspace |
+| Local ffmpeg / ffprobe paths | Empty for automatic detection |
+| Allowed SSH hosts / per-host ffmpeg paths | Empty |
+
+The same screen shows tool discovery, tests configured SSH hosts, and reports storage use. The agent tool and provider settings take effect when a session opens. The composer media count updates in connected clients when the host setting changes.
 
 ## How it works
 

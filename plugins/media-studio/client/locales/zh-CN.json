@@ -125,6 +125,8 @@
     "slashHint": "[路径]"
   },
   "settings": {
+    "restoreDefaults": "恢复默认设置",
+    "reload": "重新加载设置",
     "title": "Media studio",
     "toolsTitle": "ffmpeg",
     "thisHost": "daemon 主机",

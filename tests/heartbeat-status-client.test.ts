@@ -4,6 +4,7 @@ import { runInNewContext } from "node:vm";
 import { build } from "esbuild";
 import { labelKey, REFRESH_MS, watchHeartbeats } from "../plugins/heartbeat-status/client/monitor";
 import type { HeartbeatSummary } from "../plugins/heartbeat-status/shared/heartbeat";
+import { watchAppearance } from "../plugins/heartbeat-status/client/settings-sync";
 
 const child: HeartbeatSummary = {
   agentId: "child", workspaceId: "work", title: "Tests", status: "idle", direct: 1, descendants: 0,
@@ -61,6 +62,54 @@ test("a poll that settles after plugin removal never republishes its indicators"
   await new Promise<void>((done) => setImmediate(done));
 });
 
+test("appearance follows this host's settings pushes and reconnect; late reads cannot undo a change", async () => {
+  type Read = { status: string; values?: { accent: string; animate: boolean } };
+  const requests: ReturnType<typeof deferred<Read>>[] = [];
+  type Observer = { snapshot(): void; update(message: unknown): void };
+  let observer!: Observer;
+  let removed = false, released = false;
+  const applied: unknown[] = [];
+  const stop = watchAppearance({
+    rpc(contract: { name: string }) {
+      assert.equal(contract.name, "settings.appearance.read");
+      const request = deferred<Read>();
+      requests.push(request);
+      return request.promise;
+    },
+    paseo: { observeEvents(events: string[]) {
+      assert.deepEqual(events, ["status.plugin_settings_changed"]);
+      return {
+        subscribe(next: Observer) { observer = next; return () => { removed = true; }; },
+        release: async () => { released = true; },
+      };
+    } },
+  } as any, (settings) => applied.push(settings));
+  const change = (pluginId: string, settingsId: string) => observer.update({
+    type: "status", payload: { status: "plugin_settings_changed", pluginId, settingsId },
+  });
+  const ready = (accent: string): Read => ({ status: "ready", values: { accent, animate: false } });
+  const settle = () => new Promise<void>((done) => setImmediate(done));
+  observer.snapshot();
+  change("heartbeat-status", "other");
+  assert.equal(requests.length, 1);
+  change("custom-installation-id", "appearance");
+  requests[1].resolve(ready("amber"));
+  await settle();
+  requests[0].resolve(ready("teal"));
+  await settle();
+  assert.deepEqual(applied, [{ accent: "amber", animate: false }]);
+  observer.snapshot();
+  requests[2].resolve(ready("violet"));
+  await settle();
+  assert.deepEqual(applied.at(-1), { accent: "violet", animate: false });
+  change("heartbeat-status", "appearance");
+  stop();
+  requests[3].resolve(ready("blue"));
+  await settle();
+  assert.equal(applied.length, 2);
+  assert.ok(removed && released);
+});
+
 test("native fallback scopes composer pills to their agent and workspace and removes an expired heartbeat", async () => {
   const bundle = await build({
     entryPoints: ["plugins/heartbeat-status/index.client.tsx"],
@@ -68,7 +117,11 @@ test("native fallback scopes composer pills to their agent and workspace and rem
     external: ["@getpaseo/plugin", "@getpaseo/plugin/*", "react", "react/*", "react-native"],
   });
   const modules: Record<string, unknown> = {
-    "@getpaseo/plugin": { defineRpc: (contract: unknown) => contract },
+    "@getpaseo/plugin": {
+      defineRpc: (contract: unknown) => contract,
+      defineSettings: (definition: unknown) => definition,
+      settingsRpc: () => ({ read: { name: "settings.appearance.read" } }),
+    },
     "@getpaseo/plugin/client": {
       defineTranslations: () => ({ message: (key: string) => key }),
       useTranslation: () => ({ t: (key: string) => key }),
@@ -77,6 +130,7 @@ test("native fallback scopes composer pills to their agent and workspace and rem
     "react": {
       useSyncExternalStore: (_subscribe: unknown, snapshot: () => number) => snapshot(),
       useEffect: (setup: () => void) => setup(),
+      useMemo: (create: () => unknown) => create(),
     },
     "react/jsx-runtime": { jsx: (type: string, props: unknown) => ({ type, props }) },
     "react-native": { Platform: { OS: "ios" } },
@@ -93,7 +147,11 @@ test("native fallback scopes composer pills to their agent and workspace and rem
   let badgeRemoved = false;
   const stop = exports.exports.default!({
     rpc: async () => ({ agents }),
-    paseo: { agents: { ref: () => ({ address: { serverId: "host" } }) } },
+    paseo: {
+      agents: { ref: () => ({ address: { serverId: "host" } }) },
+      observeEvents: () => ({ subscribe: () => () => {}, release: async () => {} }),
+    },
+    addSettingsScreen: () => () => {},
     addWorkspaceRowBadgeItem(item: { Component: typeof badge }) {
       badge = item.Component;
       return () => { badgeRemoved = true; };
@@ -111,7 +169,7 @@ test("native fallback scopes composer pills to their agent and workspace and rem
   await new Promise<void>((done) => setImmediate(done));
   assert.equal(pills.get("work/child")?.label, "direct");
   assert.equal(pills.get("work/parent")?.label, "children");
-  const renderBadge = (workspaceId: string) => badge({ workspaceId, host: { id: "host" } });
+  const renderBadge = (workspaceId: string) => badge({ workspaceId, host: { id: "host" }, theme: { colors: { surface0: "#fff" } } });
   assert.equal(renderBadge("work")?.props.label, "Tests, Release");
   assert.equal(renderBadge("other-workspace"), null);
 
