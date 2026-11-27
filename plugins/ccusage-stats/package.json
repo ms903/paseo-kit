@@ -28,7 +28,7 @@
     "check:scanner": "node native/check.mjs"
   },
   "devDependencies": {
-    "@getpaseo/plugin": "0.11.1",
+    "@getpaseo/plugin": "0.18.1",
     "@tanstack/react-query": "^5.90.11",
     "@types/node": "^22.0.0",
     "@types/react": "~19.2.0",
