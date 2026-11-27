@@ -60,7 +60,7 @@ export function sessionKeyMatches(ccusageId: string, providerSessionId: string):
   return ccusageId.endsWith(`-${providerSessionId}`) || ccusageId.endsWith(`/${providerSessionId}`);
 }
 
-function sessionTarget(agent: Agent | undefined): CachedSessionId {
+export function sessionTarget(agent: Agent | undefined): CachedSessionId {
   const persistence = agent?.persistence;
   const provider = persistence?.provider ?? agent?.provider;
   const sessionId = persistence && provider === "antigravity" && !persistence.nativeHandle

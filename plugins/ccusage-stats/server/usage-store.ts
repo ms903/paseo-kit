@@ -109,7 +109,7 @@ export function createUsageStore(timezone: string, directory = path.join(paseoHo
   }
 
   return {
-    fileIndex<T>(source: "antigravity" | "codex", schema: z.ZodType<T>) {
+    fileIndex<T>(source: "antigravity" | "codex" | "turn-speed", schema: z.ZodType<T>) {
       type Item = [id: string, signature: string, value: T];
       const items = z.array(z.tuple([z.string(), z.string(), schema]));
       type Shard = { entries: Map<string, { item: Item; bytes: number }>; bytes: number };
