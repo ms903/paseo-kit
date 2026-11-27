@@ -100,6 +100,8 @@ export function createUsageStore(timezone: string, directory = path.join(paseoHo
     ];
     if (report.total) values.push(report.total);
     if (report.olderSessions) values.push(report.olderSessions);
+    if (report.sessionAgents) values.push(report.sessionAgents);
+    if (report.sessionAgents) values.push(report.sessionAgents);
     return createHash("sha256").update(JSON.stringify(values)).digest("hex");
   }
 

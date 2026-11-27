@@ -12,7 +12,7 @@
 | [file-download](plugins/file-download) | 用 Ctrl+S 或 Cmd+S 下载当前预览的文件，包括工作区外的预览 | 网页或桌面端；光标位于文件编辑器时继续保存编辑 |
 | [paseo-latex-companion](plugins/paseo-latex-companion) | 在 Better Paseo 接管的 Markdown 正文及表格中排版公式 | 网页或桌面端，同时启用官方 Better Paseo 及其 Markdown 设置 |
 | [host-monitor](plugins/host-monitor) | 在侧边栏查看所选主机的 CPU、内存、磁盘、网络和 GPU 指标 | GPU 指标取决于主机硬件及驱动 |
-| [ccusage-stats](plugins/ccusage-stats) | 在同一会话查看 token 用量、输出速度、估算费用和历史报表 | daemon 使用 npm 安装锁定的 ccusage 运行时依赖 |
+| [ccusage-stats](plugins/ccusage-stats) | 查看会话 token 用量、输出速度和估算费用，或按 Agent 来源筛选总报表 | daemon 使用 npm 安装锁定的 ccusage 运行时依赖 |
 
 ## 安装和更新
 

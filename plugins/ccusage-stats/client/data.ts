@@ -2,6 +2,7 @@ import type { PluginTheme } from "@getpaseo/plugin";
 import { useRpc } from "@getpaseo/plugin/client";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  addUsage,
   EMPTY_USAGE,
   sessionDetailRpc,
   usageReportRpc,
@@ -169,7 +170,7 @@ export function chartColors(theme: PluginTheme): readonly string[] {
 
 /** Named series before the rest fold into "Other". */
 export const MAX_NAMED_AGENTS = LIGHT_SERIES.length;
-export const OTHER_AGENT = "other";
+export const OTHER_AGENTS_LABEL = "Other agents";
 
 export interface Swatch {
   color: string;
@@ -177,34 +178,29 @@ export interface Swatch {
 }
 
 /** Use the report-wide order so charts, legends and lists agree across periods. */
-export function agentSwatch(theme: PluginTheme, agents: readonly string[], agent: string): Swatch {
-  const color = agent === OTHER_AGENT ? undefined : chartColors(theme)[agents.indexOf(agent)];
+export function agentSwatch(theme: PluginTheme, agents: readonly string[], agent: string | null): Swatch {
+  const color = agent === null ? undefined : chartColors(theme)[agents.indexOf(agent)];
   return { color: color ?? theme.colors.foregroundMuted, opacity: 1 };
 }
 
-function addUsage(a: Usage, b: Usage): Usage {
-  return {
-    inputTokens: a.inputTokens + b.inputTokens,
-    outputTokens: a.outputTokens + b.outputTokens,
-    cacheCreationTokens: a.cacheCreationTokens + b.cacheCreationTokens,
-    cacheReadTokens: a.cacheReadTokens + b.cacheReadTokens,
-    totalTokens: a.totalTokens + b.totalTokens,
-    cost: a.cost === null || b.cost === null ? null : a.cost + b.cost,
-  };
+export function agentSeriesKey(agent: string | null): string {
+  return agent === null ? "other" : `agent:${agent}`;
 }
 
+type OtherAgents = Omit<AgentUsage, "agent"> & { agent: null };
+
 /** A period's agents in report order, with anything past the named slots folded into "Other". */
-export function foldAgents(agents: readonly AgentUsage[], order: readonly string[]): AgentUsage[] {
+export function foldAgents(agents: readonly AgentUsage[], order: readonly string[]): (AgentUsage | OtherAgents)[] {
   const named: AgentUsage[] = [];
-  let other: AgentUsage | null = null;
+  let other: OtherAgents | null = null;
   for (const agent of agents) {
     const rank = order.indexOf(agent.agent);
     if (rank >= 0 && rank < MAX_NAMED_AGENTS) {
       named.push(agent);
     } else {
-      other ??= { agent: OTHER_AGENT, usage: EMPTY_USAGE, models: [] };
+      other ??= { agent: null, usage: EMPTY_USAGE, models: [] };
       other = {
-        agent: OTHER_AGENT,
+        agent: null,
         usage: addUsage(other.usage, agent.usage),
         models: [...other.models, ...agent.models],
       };

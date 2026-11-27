@@ -7,11 +7,13 @@ import {
   Pressable, ScrollView, Text, View, type PressableStateCallbackType, type TextStyle, type ViewStyle,
 } from "react-native";
 import { updatePricesRpc, type UsagePeriod, type UsageView } from "../shared/usage";
+import { AgentFilterButton, AgentFilterOptions } from "./agent-filter";
 import { Legend, PERIOD_OPTIONS, PeriodBars, Segmented } from "./charts";
 import { cacheHitRate, SESSION_USAGE_KEY, USAGE_REPORT_KEY, useUsageReport, type UsageReport } from "./data";
 import {
-  formatCost, formatPercent, formatPeriodLong, formatPeriodRange, formatTokens, periodDateBounds, reportTimeFormatter,
+  agentLabel, formatCost, formatPercent, formatPeriodLong, formatPeriodRange, formatTokens, periodDateBounds, reportTimeFormatter,
 } from "./format";
+import { filterUsageReport, reportAgentOptions } from "./report-filter";
 import { AgentList, Composition, FONT, TodayUsage, TokenChange } from "./summary";
 import { RefreshUsageButton, UsageRefreshStatus } from "./refresh";
 import { SessionList } from "./session-list";
@@ -141,8 +143,10 @@ function Body({
   theme,
   hostId,
   compact,
-  report,
+  report: unfilteredReport,
   actions,
+  agent,
+  onAgentChange,
   initialKind,
   initialPeriod,
 }: {
@@ -151,9 +155,18 @@ function Body({
   compact: boolean;
   report: UsageReport;
   actions: ReactNode;
+  agent: string | null;
+  onAgentChange(agent: string | null): void;
   initialKind: UsageView;
   initialPeriod?: string;
 }) {
+  const [agentFilterOpen, setAgentFilterOpen] = useState(false);
+  const agentOptions = useMemo(() => reportAgentOptions(unfilteredReport, agent === null ? [] : [agent]), [unfilteredReport, agent]);
+  const report = useMemo(() => filterUsageReport(unfilteredReport, agent), [unfilteredReport, agent]);
+  const selectAgent = (next: string | null) => {
+    onAgentChange(next);
+    setAgentFilterOpen(false);
+  };
   const [requestedKind, setKind] = useState(initialKind);
   const kind = requestedKind === "total" || report[requestedKind].length > 0 ? requestedKind : "daily";
   const options = PERIOD_OPTIONS.filter(({ value }) => value === "total" || report[value].length > 0);
@@ -194,12 +207,18 @@ function Body({
   return (
     <View onLayout={(event) => setWidth(event.nativeEvent.layout.width)} style={{ gap: 14 }}>
       <View style={{ flexDirection: narrow ? "column" : "row", alignItems: narrow ? "flex-start" : "center", flexWrap: "wrap", gap: 8 }}>
-        {options.length > 1 ? <Segmented theme={theme} options={options} value={kind} onChange={changeKind} accessibilityLabel="Period" /> : null}
+        <View style={{ flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 8, maxWidth: "100%" }}>
+          {options.length > 1 ? <Segmented theme={theme} options={options} value={kind} onChange={changeKind} accessibilityLabel="Period" /> : null}
+          {agentOptions.length ? <AgentFilterButton theme={theme} agent={agent} open={agentFilterOpen}
+            toggle={() => setAgentFilterOpen(open => !open)} clear={() => selectAgent(null)} /> : null}
+        </View>
         <View style={{ flex: narrow ? undefined : 1, minWidth: 0, alignSelf: "stretch", justifyContent: "center" }}>
           {updated}
         </View>
         {actions}
       </View>
+      {agentFilterOpen ? <AgentFilterOptions theme={theme} options={agentOptions} order={unfilteredReport.agents}
+        agent={agent} onSelect={selectAgent} /> : null}
       {report.refreshing ? <UsageRefreshStatus theme={theme} progress={report.progress} /> : null}
       {report.refreshError && !report.refreshing ? (
         <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
@@ -235,6 +254,7 @@ function Body({
                   kind={kind}
                   periods={periods}
                   order={report.agents}
+                  swatchOrder={unfilteredReport.agents}
                   selected={selected}
                   onSelect={select}
                   height={narrow ? 108 : 150}
@@ -242,7 +262,7 @@ function Body({
                   today={today}
                   showScale={width >= 480}
                 />
-                <Legend theme={theme} order={report.agents} periods={periods} />
+                {agent === null ? <Legend theme={theme} order={report.agents} periods={periods} /> : null}
               </View>
             ) : null}
           </Panel>
@@ -257,7 +277,7 @@ function Body({
               detail={`${period.agents.length} ${period.agents.length === 1 ? "agent" : "agents"} · ${modelCount} ${modelCount === 1 ? "model" : "models"}`}
               style={columnStyle}
             >
-              <AgentList theme={theme} order={report.agents} period={period} expandable compact={narrow} />
+              <AgentList theme={theme} order={unfilteredReport.agents} period={period} expandable compact={narrow} />
             </Panel>
           </View>
         </>
@@ -271,14 +291,20 @@ function Body({
         </Panel>
       ) : null}
 
-      <Panel theme={theme} title="Sessions">
-        <SessionList theme={theme} hostId={hostId} report={report} clock={clock} narrow={narrow} period={sessionPeriod} />
+      <Panel theme={theme} title="Sessions" detail={agent === null ? undefined : agentLabel(agent)}>
+        <SessionList theme={theme} hostId={hostId} report={report} agent={agent} swatchOrder={unfilteredReport.agents}
+          clock={clock} narrow={narrow} period={sessionPeriod} />
       </Panel>
     </View>
   );
 }
 
-export function UsageScreen({ theme, host, layout, params }: PluginScreenProps) {
+export function UsageScreen(props: PluginScreenProps) {
+  return <HostUsageScreen key={props.host.id} {...props} />;
+}
+
+function HostUsageScreen({ theme, host, layout, params }: PluginScreenProps) {
+  const [agent, setAgent] = useState<string | null>(null);
   const { data, error, isPending, preview, progress } = useUsageReport(host.id);
   const updatePrices = useRpc(updatePricesRpc);
   const queryClient = useQueryClient();
@@ -332,6 +358,8 @@ export function UsageScreen({ theme, host, layout, params }: PluginScreenProps) 
             compact={layout.compact}
             report={data}
             actions={actions}
+            agent={agent}
+            onAgentChange={setAgent}
             initialKind={initialKind}
             initialPeriod={params.period}
           />

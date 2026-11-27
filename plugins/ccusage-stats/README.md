@@ -9,6 +9,10 @@ Token usage and estimated cost of your coding agents, powered by ccusage.
 
 See [OVERVIEW.md](OVERVIEW.md) for what it shows, how it works and its limits.
 
+## Filter the report by agent
+
+Open the full **Token usage** report and use **All agents** next to the period controls. Pick a source such as Codex or OpenCode. The totals, estimated cost, history, model breakdown, and sessions follow that choice. The filter stays selected when you change the period or refresh usage. Use the clear button to return to the combined report.
+
 ## Install
 
 ```bash

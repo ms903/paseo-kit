@@ -28,8 +28,8 @@ export function createSessionList(timezone: string) {
     }
     const { agent, since, until, offset: requested = 0 } = input;
     const search = input.search?.trim().toLowerCase();
-    const matches = search || agent || since || until ? rows.filter(({ session, day, id, models }) =>
-      (!agent || session.agent === agent) &&
+    const matches = search || agent !== undefined || since || until ? rows.filter(({ session, day, id, models }) =>
+      (agent === undefined || session.agent === agent) &&
       (!since || (day !== undefined && day >= since)) &&
       (!until || (day !== undefined && day <= until)) &&
       (!search || id.includes(search) || models.some((model) => model.includes(search))),
