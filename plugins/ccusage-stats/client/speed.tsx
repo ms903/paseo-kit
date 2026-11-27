@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { Pressable, Text, View, type TextStyle } from "react-native";
 import { CCUSAGE_SETTINGS } from "../shared/settings";
 import { sessionSpeedRpc, type SessionSpeedSample } from "../shared/speed";
+import { useFocusedAgentComposer, type ReadAgentComposer } from "./composer-focus";
 import { chartColors } from "./data";
 import { formatDuration, LiveTurnDetails, observedMeasurement, observedPause, outputRate, type ObservedTurn } from "./live-speed-display";
 import { groupTurnSpeeds } from "./speed-format";
@@ -59,6 +60,7 @@ type SpeedPanelProps = {
   hostId: string;
   target: SpeedTarget;
   clock?: Intl.DateTimeFormat;
+  readAgentComposer?: ReadAgentComposer;
   runtime?: TurnSpeedRuntime;
 };
 
@@ -71,9 +73,10 @@ export function SessionSpeed(props: SpeedPanelProps) {
   return <SessionSpeedContent {...props} windowSeconds={settings.values.speedWindowSeconds} />;
 }
 
-function AgentSpeed({ agentId, runtime, ...props }: SpeedPanelProps & { agentId: string; windowSeconds: number }) {
+function AgentSpeed({ agentId, readAgentComposer, runtime, ...props }: SpeedPanelProps & { agentId: string; windowSeconds: number }) {
   const status = useAgent(agentId, (agent) => agent.status);
-  const observed = useLiveSpeed({ runtime, agentId, windowSeconds: props.windowSeconds });
+  const focused = useFocusedAgentComposer(agentId, readAgentComposer, true);
+  const observed = useLiveSpeed({ runtime: focused ? runtime : undefined, agentId, windowSeconds: props.windowSeconds });
   return <SessionSpeedContent {...props} observed={observed} agentRunning={status === null ? undefined : status === "running"} />;
 }
 

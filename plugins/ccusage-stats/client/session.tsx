@@ -8,6 +8,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { Pressable, Text, View } from "react-native";
 import { PARENT_AGENT_LABEL, sessionUsageRpc, type SessionMatch } from "../shared/usage";
+import type { ReadAgentComposer } from "./composer-focus";
 import { cacheHitRate, useSessionUsage } from "./data";
 import { agentLabel, formatAgo, formatCost, formatPercent, formatTokens, shortSessionId } from "./format";
 import { Composition, FONT, ModelRows } from "./summary";
@@ -21,8 +22,9 @@ const PILL_REFRESH_MS = 60_000;
 const AFTER_TURN_DELAY_MS = 2_000;
 const BATCH_SIZE = 200;
 
-export function SessionUsageContent({ theme, host, layout, onUpdate, turnSpeed, ...target }: PluginButtonContentProps & {
+export function SessionUsageContent({ theme, host, layout, onUpdate, readAgentComposer, turnSpeed, ...target }: PluginButtonContentProps & {
   onUpdate(match: SessionMatch): void;
+  readAgentComposer?: ReadAgentComposer;
   turnSpeed?: TurnSpeedRuntime;
 }) {
   const agentId = target.context === "agent" ? target.agentId : "";
@@ -108,7 +110,8 @@ export function SessionUsageContent({ theme, host, layout, onUpdate, turnSpeed, 
           </View>
         </View>
       ) : null}
-      {agentId ? <SessionSpeed key={`${host.id}:${agentId}`} theme={theme} hostId={host.id} target={{ agentId }} runtime={turnSpeed} /> : null}
+      {agentId ? <SessionSpeed key={`${host.id}:${agentId}`} theme={theme} hostId={host.id}
+        target={{ agentId }} readAgentComposer={readAgentComposer} runtime={turnSpeed} /> : null}
       {usage ? (
         <>
           <Composition theme={theme} usage={usage} />
@@ -181,6 +184,7 @@ function paintPill(pill: SessionPill) {
 
 export function contributeSessionPills(client: PluginClientContext): () => void {
   const turnSpeed = createTurnSpeedRuntime(client);
+  const readAgentComposer: ReadAgentComposer = (agentId) => client.composers?.({ agentId })[0];
   const pills = new Map<string, SessionPill>();
   const agents = new Map<string, AgentLike>();
   const lifetime = new AbortController();
@@ -256,9 +260,11 @@ export function contributeSessionPills(client: PluginClientContext): () => void 
         workspaceId: agent.workspaceId,
         agentId: agent.id,
         button: {
-          icon: ({ size, color }) => <UsagePillIcon size={size} color={color} agentId={agent.id} turnSpeed={turnSpeed} publish={publish} />,
+          icon: ({ size, color }) => <UsagePillIcon size={size} color={color} agentId={agent.id}
+            readAgentComposer={readAgentComposer} turnSpeed={turnSpeed} publish={publish} />,
           ...shown,
-          behavior: { kind: "popover", Content: (props) => <SessionUsageContent {...props} onUpdate={updatePill} turnSpeed={turnSpeed} /> },
+          behavior: { kind: "popover", Content: (props) => <SessionUsageContent {...props} onUpdate={updatePill}
+            readAgentComposer={readAgentComposer} turnSpeed={turnSpeed} /> },
         },
       }),
     };

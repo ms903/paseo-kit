@@ -2,6 +2,7 @@ import { useSettings, type PluginButtonIconProps } from "@getpaseo/plugin/client
 import { Icon } from "@getpaseo/plugin/client/react-native";
 import { useEffect, useRef } from "react";
 import { CCUSAGE_SETTINGS } from "../shared/settings";
+import { useFocusedAgentComposer, type ReadAgentComposer } from "./composer-focus";
 import { observedPause } from "./live-speed-display";
 import { formatRate } from "./speed-format";
 import { useSpeedMessages } from "./speed-messages";
@@ -13,6 +14,7 @@ export type PublishSpeed = (mount: object, value?: SpeedPillLabel) => void;
 
 type IconProps = Pick<PluginButtonIconProps, "size" | "color"> & {
   agentId: string;
+  readAgentComposer: ReadAgentComposer;
   turnSpeed: TurnSpeedRuntime;
   publish: PublishSpeed;
 };
@@ -22,13 +24,22 @@ export function UsagePillIcon(props: IconProps) {
   if (settings.status !== "ready" || !settings.values.showSessionSpeed) {
     return <Icon name="Coins" size={props.size} color={props.color} />;
   }
-  return <ObservedIcon {...props} basis={settings.values.speedPillBasis} windowSeconds={settings.values.speedWindowSeconds} />;
+  return <FocusedIcon {...props} basis={settings.values.speedPillBasis} windowSeconds={settings.values.speedWindowSeconds} />;
 }
 
-function ObservedIcon({ agentId, turnSpeed, basis, windowSeconds, publish, size, color }: IconProps & {
+type ObservedIconProps = IconProps & {
   basis: Basis;
   windowSeconds: number;
-}) {
+};
+
+function FocusedIcon(props: ObservedIconProps) {
+  const focused = useFocusedAgentComposer(props.agentId, props.readAgentComposer);
+  return focused
+    ? <ObservedIcon {...props} />
+    : <Icon name="Coins" size={props.size} color={props.color} />;
+}
+
+function ObservedIcon({ agentId, turnSpeed, basis, windowSeconds, publish, size, color }: ObservedIconProps) {
   const { t, locale } = useSpeedMessages();
   const mount = useRef({}).current;
   const view = useLiveSpeed({ runtime: turnSpeed, agentId, windowSeconds });
