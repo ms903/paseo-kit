@@ -23,8 +23,8 @@ export function watchAppearance(
     update(message) {
       if (message.type !== "status") return;
       const change = message.payload;
-      if (change.status === "plugin_settings_changed" && change.pluginId === "heartbeat-status" &&
-          change.settingsId === heartbeatSettings.id) refresh();
+      // An installation can have a custom plugin ID. The read RPC is scoped to this installation.
+      if (change.status === "plugin_settings_changed" && change.settingsId === heartbeatSettings.id) refresh();
     },
   });
   return () => {

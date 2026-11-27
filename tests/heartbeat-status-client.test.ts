@@ -90,10 +90,9 @@ test("appearance follows this host's settings pushes and reconnect; late reads c
   const ready = (accent: string): Read => ({ status: "ready", values: { accent, animate: false } });
   const settle = () => new Promise<void>((done) => setImmediate(done));
   observer.snapshot();
-  change("another-plugin", "appearance");
   change("heartbeat-status", "other");
   assert.equal(requests.length, 1);
-  change("heartbeat-status", "appearance");
+  change("custom-installation-id", "appearance");
   requests[1].resolve(ready("amber"));
   await settle();
   requests[0].resolve(ready("teal"));
