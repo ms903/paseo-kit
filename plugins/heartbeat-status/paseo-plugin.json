@@ -1,0 +1,8 @@
+{
+  "id": "heartbeat-status",
+  "name": "Heartbeat Status",
+  "description": "Shows which Paseo agents have an active heartbeat, including heartbeats on descendant agents.",
+  "requirements": {
+    "paseo": ">=0.18.1"
+  }
+}

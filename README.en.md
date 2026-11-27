@@ -6,6 +6,7 @@ ms903 maintains this collection against **Paseo 0.18.1**. Each plugin has its ow
 
 | Plugin | Purpose |
 | --- | --- |
+| [heartbeat-status](plugins/heartbeat-status) | See which agents have an active heartbeat of their own or through a descendant on the agent tab and workspace sidebar on web and desktop. Requires Paseo 0.18.1 or later. |
 | [tab-recovery](plugins/tab-recovery) | Reopen an archived top-level agent in the current workspace. |
 | [media-studio](plugins/media-studio) | Review video, audio and images in chat, send timecoded notes, and transfer media. Previews use FFmpeg on the daemon host. Playback and uploads use the web or desktop client. |
 | [file-download](plugins/file-download) | Download the focused file preview on web and desktop with Ctrl+S or Cmd+S. The shortcut still saves edits inside the editor. |
