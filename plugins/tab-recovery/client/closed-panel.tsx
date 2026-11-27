@@ -12,12 +12,16 @@ const OPEN_TIMEOUT_MS = 15_000;
 
 type Navigation = NonNullable<PluginWorkspacePanelProps["navigation"]>;
 
-export function ClosedAgentsPanel({ theme, layout, workspaceId, navigation }: PluginWorkspacePanelProps) {
+export function ClosedAgentsPanel(props: PluginWorkspacePanelProps) {
+  return <WorkspaceClosedAgents key={JSON.stringify([props.host.id, props.workspaceId])} {...props} />;
+}
+
+function WorkspaceClosedAgents({ theme, host, layout, workspaceId, navigation }: PluginWorkspacePanelProps) {
   const listClosed = useRpc(closedAgentsRpc);
   const restore = useRpc(restoreAgentRpc);
   const toast = useToast();
   const closed = useQuery({
-    queryKey: ["closed-agents", workspaceId],
+    queryKey: ["tab-recovery", "closed-agents", host.id, workspaceId],
     queryFn: () => listClosed({ workspaceId }),
     refetchInterval: REFRESH_MS,
   });
@@ -25,16 +29,16 @@ export function ClosedAgentsPanel({ theme, layout, workspaceId, navigation }: Pl
   const [opening, setOpening] = useState<string | null>(null);
 
   async function reopen(agent: ClosedAgent) {
-    if (restoring) return;
+    if (restoring || opening) return;
     setRestoring(agent.id);
     try {
       await restore({ workspaceId, agentId: agent.id });
       setOpening(agent.id);
-      void closed.refetch();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
     } finally {
       setRestoring(null);
+      void closed.refetch();
     }
   }
 
@@ -66,8 +70,8 @@ export function ClosedAgentsPanel({ theme, layout, workspaceId, navigation }: Pl
               theme={theme}
               compact={layout.compact}
               agent={item}
-              busy={restoring === item.id}
-              disabled={restoring !== null && restoring !== item.id}
+              busy={restoring === item.id || opening === item.id}
+              disabled={restoring !== null || opening !== null}
               onReopen={() => void reopen(item)}
             />
           )}
@@ -77,6 +81,7 @@ export function ClosedAgentsPanel({ theme, layout, workspaceId, navigation }: Pl
         <OpenWhenRunning
           key={opening}
           agentId={opening}
+          hostId={host.id}
           navigation={navigation}
           onDone={(opened) => {
             setOpening(null);
@@ -94,14 +99,16 @@ export function ClosedAgentsPanel({ theme, layout, workspaceId, navigation }: Pl
  */
 function OpenWhenRunning({
   agentId,
+  hostId,
   navigation,
   onDone,
 }: {
   agentId: string;
+  hostId: string;
   navigation: Navigation | undefined;
   onDone(opened: boolean): void;
 }) {
-  const status = useAgent(agentId, (agent) => ({ status: agent.status }))?.status ?? null;
+  const status = useAgent(agentId, (agent) => agent.status);
   // The parent passes a fresh callback on every render; the timeout must not restart with it.
   const done = useRef(onDone);
   done.current = onDone;
@@ -115,10 +122,15 @@ function OpenWhenRunning({
     if (!navigation) {
       done.current(false);
     } else if (status && status !== "closed") {
-      navigation.openAgent({ agentId });
+      try {
+        navigation.openAgent({ agentId, serverId: hostId });
+      } catch {
+        done.current(false);
+        return;
+      }
       done.current(true);
     }
-  }, [status, navigation, agentId]);
+  }, [status, navigation, agentId, hostId]);
   return null;
 }
 

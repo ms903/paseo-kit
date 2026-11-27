@@ -9,8 +9,20 @@ const PAGE_SIZE = 200;
 const MAX_AGENTS = 50;
 const RESTORE_TIMEOUT_MS = 90_000;
 
-const listCaches = new WeakMap<Paseo, { at: number; pending: Promise<Map<string, ClosedAgent[]>> }>();
-const restoring = new Map<string, Promise<void>>();
+const listCaches = new WeakMap<Paseo, { expires: number; pending: Promise<Map<string, ClosedAgent[]>> }>();
+const restoresByHost = new WeakMap<Paseo, Map<string, Promise<void>>>();
+
+// Paseo hides background sessions and only archives a tab on close if it has no parent.
+function isRecoverable(agent: {
+  workspaceId?: string | null;
+  archivedAt?: string | null;
+  labels?: Record<string, unknown> | null;
+  background?: boolean;
+}): agent is typeof agent & { workspaceId: string; archivedAt: string } {
+  const parent = agent.labels?.[PARENT_AGENT_LABEL];
+  return !!agent.workspaceId && !!agent.archivedAt && !agent.background &&
+    !(typeof parent === "string" && parent.trim());
+}
 
 async function scanClosedAgents(paseo: Paseo): Promise<Map<string, ClosedAgent[]>> {
   const grouped = new Map<string, ClosedAgent[]>();
@@ -21,8 +33,7 @@ async function scanClosedAgents(paseo: Paseo): Promise<Map<string, ClosedAgent[]
       page: { limit: PAGE_SIZE, ...(cursor ? { cursor } : {}) },
     });
     for (const { agent } of result.entries) {
-      // Closing a subagent's tab only hides it, so only top-level agents end up archived by a close.
-      if (!agent.workspaceId || !agent.archivedAt || agent.labels?.[PARENT_AGENT_LABEL]) continue;
+      if (!isRecoverable(agent)) continue;
       const agents = grouped.get(agent.workspaceId) ?? [];
       agents.push({
         id: agent.id,
@@ -43,35 +54,50 @@ async function scanClosedAgents(paseo: Paseo): Promise<Map<string, ClosedAgent[]
 
 export async function listClosedAgents(paseo: Paseo, workspaceId: string): Promise<ClosedAgent[]> {
   let entry = listCaches.get(paseo);
-  if (!entry || Date.now() - entry.at > 30_000) {
-    const next = { at: Date.now(), pending: scanClosedAgents(paseo) };
+  if (!entry || Date.now() >= entry.expires) {
+    const next = { expires: Infinity, pending: scanClosedAgents(paseo) };
     entry = next;
     listCaches.set(paseo, next);
-    next.pending.then(() => { next.at = Date.now(); }, () => { if (listCaches.get(paseo) === next) listCaches.delete(paseo); });
+    next.pending.then(() => { next.expires = Date.now() + 30_000; }, () => { if (listCaches.get(paseo) === next) listCaches.delete(paseo); });
   }
   return (await entry.pending).get(workspaceId) ?? [];
 }
 
 export function restoreClosedAgent(paseo: Paseo, workspaceId: string, agentId: string): Promise<void> {
-  const existing = restoring.get(agentId);
+  const restoring = restoresByHost.get(paseo) ?? new Map<string, Promise<void>>();
+  restoresByHost.set(paseo, restoring);
+  const key = JSON.stringify([workspaceId, agentId]);
+  const existing = restoring.get(key);
   if (existing) return existing;
   const pending = (async () => {
-    const result = await paseo.agents.ref(agentId).refresh();
-    const agent = result?.agent;
-    if (!agent || agent.workspaceId !== workspaceId || !agent.archivedAt || agent.labels?.[PARENT_AGENT_LABEL]) throw new Error("This agent is no longer closed in this workspace.");
-    await restoreAgent(agentId);
-    listCaches.delete(paseo);
-  })().finally(() => restoring.delete(agentId));
-  restoring.set(agentId, pending);
+    try {
+      const handle = paseo.agents.ref(agentId);
+      const result = await handle.refresh();
+      const agent = result?.agent;
+      if (!agent || agent.workspaceId !== workspaceId || !isRecoverable(agent)) {
+        throw new Error("This agent is no longer closed in this workspace.");
+      }
+      if (typeof handle.reload === "function") {
+        const reloaded = await handle.reload();
+        if (!reloaded?.agent || reloaded.agent.archivedAt) {
+          throw new Error("The daemon could not confirm that this agent was reopened.");
+        }
+      } else {
+        await restoreWithCli(agentId);
+      }
+    } finally {
+      // A different client may have reopened it, or a failed reload may have cleared archivedAt.
+      listCaches.delete(paseo);
+    }
+  })().finally(() => restoring.delete(key));
+  restoring.set(key, pending);
   return pending;
 }
 
 /**
- * The SDK has no unarchive call, so this runs `paseo agent reload`. It sends the same request as
- * the Unarchive button in an archived agent's tab: unarchive, then resume the provider session.
- * The CLI finds this daemon through PASEO_HOME, which the plugin process inherits.
+ * Older hosts expose refresh (a read) but not reload. Their CLI can send the same restore request.
  */
-export function restoreAgent(agentId: string): Promise<void> {
+function restoreWithCli(agentId: string): Promise<void> {
   return new Promise((resolve, reject) => {
     execFile(
       "paseo",

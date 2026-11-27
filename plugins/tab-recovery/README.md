@@ -17,7 +17,7 @@ cd plugins/tab-recovery && npm install
 paseo plugin install "$PWD"
 ```
 
-Requires Paseo 0.11.1 or later with plugins enabled on the daemon.
+Supports Paseo 0.11.1 or later with plugins enabled on the daemon. On Paseo 0.18.1, the plugin restores agents using the connected daemon's SDK. Older hosts that lack the SDK reload method need the matching `paseo` CLI on the daemon's PATH.
 
 ## Develop
 
