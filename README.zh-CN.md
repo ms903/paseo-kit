@@ -15,6 +15,7 @@
 | [`file-download`](plugins/file-download) | Download file | 用 Cmd+S 或 Ctrl+S 下载当前预览的文件，包括 `/tmp` 等工作区外的文件。 |
 | [`tab-recovery`](plugins/tab-recovery) | Closed agents | 列出当前工作区里被关闭（即被归档）的 agent，一键重新打开。 |
 | [`media-studio`](plugins/media-studio) | Media studio | 审看 agent 产出的图片、视频和音频：对话内卡片、带胶片条和波形时间线的流式播放器、带时间码的批注回传给 agent、大文件上传下载、支持 SSH 远程主机上的文件。 |
+| [`paseo-latex-companion`](plugins/paseo-latex-companion) | LaTeX Companion for Better Paseo | 在桌面和网页端为原版 Better Paseo 的回复和表格排版 LaTeX 公式。 |
 
 ### host-monitor
 

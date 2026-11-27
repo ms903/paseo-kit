@@ -19,6 +19,7 @@ complete, self-contained Paseo plugin project.
 | [`file-download`](plugins/file-download) | Download file | Cmd+S or Ctrl+S downloads the file you are previewing, including files outside the workspace such as `/tmp`. |
 | [`tab-recovery`](plugins/tab-recovery) | Closed agents | Lists the agents whose tab was closed (which archives them) in the current workspace and reopens one with a press. |
 | [`media-studio`](plugins/media-studio) | Media studio | Review the images, video and audio agents make: chat cards, a streaming player with a filmstrip and waveform timeline, timecoded notes to the agent, large uploads and downloads, files on SSH hosts. |
+| [`paseo-latex-companion`](plugins/paseo-latex-companion) | LaTeX Companion for Better Paseo | Typesets LaTeX inline, in display blocks, and inside Better Paseo tables on web and desktop. |
 
 ### host-monitor
 

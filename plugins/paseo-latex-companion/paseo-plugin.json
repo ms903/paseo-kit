@@ -1,0 +1,6 @@
+{
+  "id": "paseo-latex-companion",
+  "name": "LaTeX Companion for Better Paseo",
+  "description": "Render LaTeX inside Better Paseo web and desktop replies. Enable alongside the official Better Paseo plugin.",
+  "requirements": { "paseo": ">=0.14.0" }
+}
