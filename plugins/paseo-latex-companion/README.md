@@ -26,7 +26,7 @@ paseo plugin install git:ms903/paseo-kit:plugins/paseo-latex-companion
 
 ## 兼容范围
 
-本插件用于 Paseo 网页端和使用网页渲染的桌面端。已在 Paseo 0.18.0 的 Chromium 网页端测试官方 Better Paseo 1.6.5 和 1.7.0，以及保持本插件启用时从前者升级到后者。原生 iOS 和 Android 客户端目前只显示原版 Better Paseo 的输出。
+本插件用于 Paseo 网页端和使用网页渲染的桌面端。已在 Paseo 0.18.0 的 Chromium 网页端测试官方 Better Paseo 1.6.5 和 1.7.0，以及保持本插件启用时从前者升级到后者。还在 Paseo 0.18.1 的 Chromium 网页端复测了与 Better Paseo 1.7.0 共存时的正文及表格公式。原生 iOS 和 Android 客户端目前只显示原版 Better Paseo 的输出。
 
 Better Paseo 负责回复、表格、工具栏和复制操作。本插件在回复可见后，从 Better Paseo 的 Markdown 块读取源码，只对含公式的内容增加排版。宿主的表格解析器可能在排版之前就把绝对值竖线当成列分隔符。此时本插件从原文恢复显示，取完整原文请使用表格的 **Copy as Markdown**；按单元格选择复制仍取原版解析的内容。
 
