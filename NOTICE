@@ -9,5 +9,9 @@ Third-party components retain the licenses supplied by their copyright holders.
 The LaTeX Companion distribution includes KaTeX, its fonts, and Marked. Their
 license notices are in plugins/paseo-latex-companion/licenses/.
 
+The live turn-speed meter in ccusage-stats includes code from
+Drenalol/paseo-turn-speed, copyright (c) 2026 Bogdan Yanysh, licensed under MIT.
+The upstream license accompanies the plugin.
+
 paseo-kit is an independent project and is not affiliated with or endorsed by
 the Paseo authors.
