@@ -1,5 +1,9 @@
 # 更新记录
 
+## Heartbeat Status 0.1.0
+
+新增独立插件，在网页和桌面端的 agent 标签、工作区侧栏标出启用中的心跳。子 agent 和更深层后代的心跳也会标记父会话。需要 Paseo 0.18.1 或更高版本。[安装和使用](plugins/heartbeat-status)
+
 ## Paseo 0.18.1 维护版
 
 | 插件 | 版本 | 变化 |

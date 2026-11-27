@@ -6,6 +6,7 @@
 
 | 插件 | 用途 | 使用条件 |
 | --- | --- | --- |
+| [heartbeat-status](plugins/heartbeat-status) | 标出自己或子 agent 有启用中心跳的会话 | Paseo 0.18.1 及以上，在网页和桌面端的 agent 标签、工作区侧栏查看 |
 | [tab-recovery](plugins/tab-recovery) | 找回当前工作区已归档的主 agent，并重新打开标签页 | 从命令面板选择 **Reopen a closed agent** |
 | [media-studio](plugins/media-studio) | 在会话中审阅图片、视频和音频，发送带时间码的批注，传输媒体文件 | 播放和上传使用网页或桌面端；预览和转码需要 daemon 主机上的 FFmpeg |
 | [file-download](plugins/file-download) | 用 Ctrl+S 或 Cmd+S 下载当前预览的文件，包括工作区外的预览 | 网页或桌面端；光标位于文件编辑器时继续保存编辑 |
@@ -18,6 +19,7 @@
 在目标 daemon 的 **Settings → Plugins** 启用插件。按需运行对应行即可安装。
 
 ```sh
+paseo plugin install git:ms903/paseo-kit:plugins/heartbeat-status
 paseo plugin install git:ms903/paseo-kit:plugins/tab-recovery
 paseo plugin install git:ms903/paseo-kit:plugins/media-studio
 paseo plugin install git:ms903/paseo-kit:plugins/file-download

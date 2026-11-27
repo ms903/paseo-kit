@@ -1,7 +1,7 @@
 {
   "name": "paseo-kit",
   "private": true,
-  "description": "Six Paseo plugins for host metrics, agent usage, downloads, closed agents, media, and LaTeX replies.",
+  "description": "Paseo plugins for agent heartbeats, host metrics, usage, downloads, closed agents, media, and LaTeX replies.",
   "author": "ms903",
   "license": "Apache-2.0",
   "homepage": "https://github.com/ms903/paseo-kit#readme",

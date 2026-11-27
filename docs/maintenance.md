@@ -17,7 +17,7 @@ npm run check:mobile
 
 根目录脚本会发现每个插件的 manifest。构建检查比较已提交的公式插件入口与重新构建的结果；移动端检查验证网页专用代码的边界，并在模拟的 iOS 和 Android 环境调用公式插件入口。
 
-以下命令使用锁定的 Paseo CLI，在临时 daemon 中安装并启动六个插件。GitHub Actions 的 **CI → Run workflow** 也能选用 npm 当前的 `latest` 进行同一检查。
+以下命令使用锁定的 Paseo CLI，在临时 daemon 中安装并启动仓库中的每个插件。GitHub Actions 的 **CI → Run workflow** 也能选用 npm 当前的 `latest` 进行同一检查。
 
 ```sh
 npm ci --prefix scripts/host-smoke
