@@ -92,7 +92,7 @@ function SessionSpeedContent({ theme, hostId, target, clock, windowSeconds, agen
   const [expanded, setExpanded] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const query = useQuery({
-    queryKey: [...speedQueryKey(hostId, target), ...(current ? [windowSeconds] : [])],
+    queryKey: speedQueryKey(hostId, target),
     queryFn: () => read(target),
     retry: false,
     staleTime: current ? 0 : 30_000,
@@ -108,7 +108,7 @@ function SessionSpeedContent({ theme, hostId, target, clock, windowSeconds, agen
     }
   }, [agentRunning, refetch]);
   const groups = groupTurnSpeeds(query.data?.turns ?? []);
-  const active = observed && observed.phase !== "idle" ? observed.phase === "running" : !query.isError && query.data?.active === true;
+  const active = observed && observed.phase !== "idle" ? observed.phase === "running" : agentRunning ?? query.data?.active === true;
   const pause = observedPause(observed);
   const measured = observedMeasurement(observed);
   const latest = groups[0];
@@ -118,7 +118,7 @@ function SessionSpeedContent({ theme, hostId, target, clock, windowSeconds, agen
   const alternates = main && latest?.filter((sample) => sample.turnId === main.turnId &&
     (sample.basis !== main.basis || sample.source !== main.source));
   const liveDetails = observed && observed.phase !== "idle" && (active || useObserved) ? observed : null;
-  const history = groups.length > (active ? 0 : 1) ? groups.slice(0, RECENT_TURNS) : [];
+  const history = groups.some(([sample]) => sample.turnId !== main?.turnId) ? groups.slice(0, RECENT_TURNS) : [];
   const chartBasis = history[0]?.[0];
   const chartSeries = chartBasis ? history.flat().filter((sample) => sample.basis === chartBasis.basis && sample.source === chartBasis.source) : [];
   const chartMaximum = chartSeries.length > 1 ? Math.max(...chartSeries.map(({ tokensPerSecond }) => tokensPerSecond)) : 0;
