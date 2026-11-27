@@ -153,16 +153,17 @@ export async function listRecent(host: MediaHost, root: string, limit: number): 
 export async function listFolder(host: MediaHost, dir: string, limit: number): Promise<{ entries: MediaEntry[]; truncated: boolean }> {
   const result: MediaEntry[] = [];
   const listing = await host.listDir(dir);
+  const paths = host.remote ? path.posix : path;
   const entries = await dropSourceCode(
     listing.entries,
-    (entry) => (entry.isDirectory ? null : { path: path.posix.join(dir, entry.name), size: entry.size }),
+    (entry) => (entry.isDirectory ? null : { path: paths.join(dir, entry.name), size: entry.size }),
     (file, length) => host.readRange(file, 0, length),
   );
   for (const entry of entries) {
     const kind = entry.isDirectory ? "directory" : mediaKindOf(entry.name);
     if (!kind) continue;
     result.push({
-      path: refOf(host, path.posix.join(dir, entry.name)),
+      path: refOf(host, paths.join(dir, entry.name)),
       name: entry.name,
       kind,
       size: entry.isDirectory ? 0 : entry.size,
@@ -185,10 +186,11 @@ export function safeFileName(name: string): string {
 
 /** Publish a completed part file with an atomic, exclusive destination claim. */
 export async function publishUnique(host: MediaHost, from: string, dir: string, name: string, journal?: { before(target: string): Promise<void>; commit(target: string): Promise<void> }): Promise<string> {
-  const ext = path.extname(name);
+  const paths = host.remote ? path.posix : path;
+  const ext = paths.extname(name);
   const stem = name.slice(0, name.length - ext.length);
   for (let index = 1; index < 1000; index += 1) {
-    const candidate = path.posix.join(dir, index === 1 ? name : `${stem} (${index})${ext}`);
+    const candidate = paths.join(dir, index === 1 ? name : `${stem} (${index})${ext}`);
     await journal?.before(candidate);
     if (await host.publishExclusive(from, candidate)) {
       await journal?.commit(candidate);

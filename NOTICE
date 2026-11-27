@@ -1,14 +1,13 @@
 paseo-kit
 Copyright (c) 2026-present banbxio
 
-Portions of this software are licensed as follows:
+Maintained by ms903 at https://github.com/ms903/paseo-kit.
+This repository includes work originating in https://github.com/a31521424/paseo-kit.
 
-* Third-party components used by paseo-kit remain licensed under the
-  licenses provided by their respective copyright holders. See the
-  "Dependencies" section of README.md.
-* Except for those third-party components, paseo-kit is licensed under the
-  Apache License, Version 2.0, found in the LICENSE file. This matches the
-  license of Paseo (https://github.com/getpaseo/paseo).
+paseo-kit is licensed under the Apache License, Version 2.0, found in LICENSE.
+Third-party components retain the licenses supplied by their copyright holders.
+The LaTeX Companion distribution includes KaTeX, its fonts, and Marked. Their
+license notices are in plugins/paseo-latex-companion/licenses/.
 
 paseo-kit is an independent project and is not affiliated with or endorsed by
 the Paseo authors.

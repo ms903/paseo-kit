@@ -74,7 +74,8 @@ function RecordRow({
   const toast = useToast();
   const workspaceName = useWorkspace(record.workspaceId, (workspace) => ({ name: workspace.title ?? workspace.name }))?.name;
   const muted = theme.colors.foregroundMuted;
-  const directory = record.path.includes("/") ? record.path.slice(0, record.path.lastIndexOf("/")) || "/" : "";
+  const separator = Math.max(record.path.lastIndexOf("/"), record.path.lastIndexOf("\\"));
+  const directory = separator < 0 ? "" : record.path.slice(0, separator) || record.path[0];
   const status =
     record.status === "downloading"
       ? record.total > 0

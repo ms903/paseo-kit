@@ -40,8 +40,11 @@ function entries(): Entries {
   return holder[MEMORY_KEY]!;
 }
 
-function keyOf(path: string): string {
-  return `${currentServerId() ?? ""}\u0000${path}`;
+// Until Paseo identifies this host, playback belongs only to this plugin instance.
+const temporary = new Map<string, PlaybackMemory>();
+function keyOf(path: string): string | null {
+  const id = currentServerId();
+  return id ? `${id}\u0000${path}` : null;
 }
 
 let flushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -66,18 +69,29 @@ function flush(): void {
 let stopPageHide: (() => void) | null = null;
 
 export function rememberedPlayback(path: string): PlaybackMemory | null {
-  return entries()[keyOf(path)] ?? null;
+  const key = keyOf(path);
+  return (key && entries()[key]) || temporary.get(path) || null;
 }
 
 export function rememberPlayback(path: string, memory: Omit<PlaybackMemory, "savedAt">, persistNow = false): void {
+  const key = keyOf(path);
+  const value = { ...memory, savedAt: Date.now() };
+  if (!key) {
+    temporary.set(path, value);
+    return;
+  }
+  temporary.delete(path);
   stopPageHide ??= onPageHide(flush);
-  entries()[keyOf(path)] = { ...memory, savedAt: Date.now() };
+  entries()[key] = value;
   if (persistNow) flush();
   else flushSoon();
 }
 
 export function forgetPlayback(path: string): void {
-  delete entries()[keyOf(path)];
+  temporary.delete(path);
+  const key = keyOf(path);
+  if (!key) return;
+  delete entries()[key];
   flushSoon();
 }
 

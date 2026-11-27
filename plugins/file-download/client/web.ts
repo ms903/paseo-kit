@@ -23,7 +23,17 @@ interface KeyEvent {
   preventDefault(): void;
 }
 
-declare const document: { createElement(tag: string): DomElement; body: DomElement };
+interface PaneElement {
+  parentElement: PaneElement | null;
+  getClientRects(): { length: number };
+  closest(selector: string): PaneElement | null;
+}
+
+declare const document: {
+  createElement(tag: string): DomElement;
+  body: DomElement;
+  querySelectorAll(selector: string): ArrayLike<PaneElement>;
+};
 interface SaveWritable {
   write(bytes: Uint8Array): Promise<void>;
   close(): Promise<void>;
@@ -35,7 +45,6 @@ declare const window: {
   removeEventListener(type: "keydown", listener: (event: KeyEvent) => void): void;
 };
 declare const location: { pathname: string };
-declare const localStorage: { getItem(key: string): string | null };
 declare const navigator: { platform?: string; userAgent?: string; userAgentData?: { platform?: string } } | undefined;
 
 // React Native types Blob with string parts only; browsers also take binary ones.
@@ -98,17 +107,29 @@ export interface FocusedTab {
   filePath: string | null;
 }
 
-interface LayoutNode {
-  kind?: string;
-  pane?: { id?: string; focusedTabId?: string; tabs?: { tabId?: string; target?: { kind?: string; path?: string } }[] };
-  group?: { children?: LayoutNode[] };
+interface PaneProps {
+  isPaneFocused?: boolean;
+  isWorkspaceFocused?: boolean;
+  content?: { paneContextValue?: { serverId?: string; workspaceId?: string; target?: { kind?: string; path?: string } } };
 }
 
-/**
- * The focused tab of the workspace on screen. Paseo has no plugin API for it, so this reads the tab
- * layout the app persists in local storage, which it updates as soon as tabs change. Null outside a
- * workspace or when that private format cannot be read.
- */
+/** Paseo renders WorkspacePaneContent directly inside a host View in desktop, compact and sheet layouts. */
+function readPaneProps(preview: PaneElement): PaneProps | null {
+  for (let node: PaneElement | null = preview; node; node = node.parentElement) {
+    // React DOM keeps the most recently committed props on the element.
+    const key = Object.keys(node).find((name) => name.startsWith("__reactProps$"));
+    if (!key) continue;
+    const children = Reflect.get(node, key)?.children;
+    for (const child of Array.isArray(children) ? children : [children]) {
+      const props = child?.props as PaneProps | undefined;
+      if (props?.content?.paneContextValue && typeof props.isPaneFocused === "boolean" &&
+          typeof props.isWorkspaceFocused === "boolean") return props;
+    }
+  }
+  return null;
+}
+
+/** Read the rendered file preview in this window. Persisted layouts can belong to a different window. */
 export function readFocusedTab(): FocusedTab | null {
   if (!isWeb) return null;
   try {
@@ -116,27 +137,19 @@ export function readFocusedTab(): FocusedTab | null {
     if (!route) return null;
     const serverId = decodeURIComponent(route[1] ?? "");
     const workspaceId = decodeURIComponent(route[2] ?? "");
-    const raw = localStorage.getItem("workspace-layout-state");
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as { state?: unknown };
-    const state = (parsed.state ?? parsed) as {
-      layoutByWorkspace?: Record<string, { root?: LayoutNode; focusedPaneId?: string }>;
-    };
-    const layouts = state.layoutByWorkspace ?? {};
-    const layout =
-      layouts[`${serverId}:${workspaceId}`] ??
-      Object.entries(layouts).find(([key]) => key.endsWith(`:${workspaceId}`))?.[1];
-    if (!layout) return { serverId, workspaceId, filePath: null };
-    const panes: NonNullable<LayoutNode["pane"]>[] = [];
-    const walk = (node: LayoutNode | undefined) => {
-      if (!node) return;
-      if (node.kind === "pane" && node.pane) panes.push(node.pane);
-      if (node.kind === "group") node.group?.children?.forEach(walk);
-    };
-    walk(layout.root);
-    const pane = panes.find((candidate) => candidate.id === layout.focusedPaneId);
-    const target = pane?.tabs?.find((tab) => tab.tabId === pane.focusedTabId)?.target;
-    const filePath = target?.kind === "file" && typeof target.path === "string" ? target.path : null;
+    const sheetSelector = '[data-testid="sheet-tab-body"]';
+    const sheetOpen = Array.from(document.querySelectorAll(sheetSelector)).some((sheet) => sheet.getClientRects().length > 0);
+    let filePath: string | null = null;
+    for (const preview of Array.from(document.querySelectorAll('[data-testid="workspace-file-pane"]'))) {
+      if (!preview.getClientRects().length || (sheetOpen && !preview.closest(sheetSelector))) continue;
+      const props = readPaneProps(preview);
+      const pane = props?.content?.paneContextValue;
+      if (!props?.isPaneFocused || !props.isWorkspaceFocused || pane?.serverId !== serverId ||
+          pane.workspaceId !== workspaceId || pane.target?.kind !== "file" ||
+          typeof pane.target.path !== "string" || !pane.target.path) continue;
+      if (filePath !== null) return null;
+      filePath = pane.target.path;
+    }
     return { serverId, workspaceId, filePath };
   } catch {
     return null;

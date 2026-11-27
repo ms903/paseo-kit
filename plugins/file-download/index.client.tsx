@@ -13,11 +13,12 @@ export default function contribute(client: PluginClientContext) {
     icon: "Download",
     keywords: ["download", "save", "file", "export"],
     context: "workspace",
-    onSelect() {
+    onSelect({ workspace, rpc }) {
       const focused = readFocusedTab();
       // Paseo shows a thrown error as a toast.
-      if (!focused?.filePath) throw new Error(NOT_A_FILE);
-      void downloadFile(client.rpc, focused.workspaceId, focused.filePath);
+      if (!focused?.filePath || focused.workspaceId !== workspace.id ||
+          (workspace.hostId && focused.serverId !== workspace.hostId)) throw new Error(NOT_A_FILE);
+      void downloadFile(rpc, workspace.id, focused.filePath);
     },
   });
   client.addCommandCenterItem({

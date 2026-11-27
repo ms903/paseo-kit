@@ -308,11 +308,13 @@ export const projectSummarySchema = z.object({
 });
 export type ProjectSummary = z.infer<typeof projectSummarySchema>;
 
+export const PROJECT_SUMMARY_BATCH_SIZE = 200;
+
 /** How much media each folder on the daemon host holds, from a quick bounded scan; for the composer pill. */
 export const projectSummaryRpc = defineRpc({
   name: "media.project.summary",
   input: z.object({
-    dirs: z.array(z.string().min(1)).max(200),
+    dirs: z.array(z.string().min(1)).max(PROJECT_SUMMARY_BATCH_SIZE),
     /** Scan again instead of answering from the last minute's results, as after a turn. */
     fresh: z.boolean().default(false),
   }),

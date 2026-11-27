@@ -5,7 +5,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Image, Pressable, ScrollView, Text, View, type FlatList as NativeFlatList, type TextInput as NativeTextInput } from "react-native";
 import { z } from "zod";
-import { formatBytes, formatDuration, joinPath, mediaKindOf, relativeTo } from "../shared/media";
+import { baseName, displayPath, formatBytes, formatDuration, joinPath, mediaKindOf, relativeTo } from "../shared/media";
 import { listRpc, probeRpc, statusRpc, uploadPendingRpc, type MediaEntry, type PendingUpload } from "../shared/rpc";
 import { settingsDefinition } from "../shared/settings";
 import { messages } from "./i18n";
@@ -59,7 +59,7 @@ function EntryRow({
   const timed = entry.kind === "video" || entry.kind === "audio";
   const poster = useEntryPoster(entry.path, entry.modifiedAt, 160, visual);
   const probe = useEntryDuration(entry, timed);
-  const relative = relativeTo(root, entry.path);
+  const relative = displayPath(relativeTo(root, entry.path));
   const folder = relative.includes("/") ? relative.slice(0, relative.lastIndexOf("/")) : "";
   const isDir = entry.kind === "directory";
   return (
@@ -202,7 +202,7 @@ function SourcePicker({
 function shortLocation(location: string): string {
   const host = remotePrefix(location);
   const rest = host ? location.slice(host.length + 1) : location;
-  const name = rest.replace(/\/+$/, "").split("/").pop() || rest;
+  const name = baseName(rest) || rest;
   return host ? `${host} · ${name}` : name;
 }
 
@@ -344,7 +344,7 @@ export function MediaPanel({ theme, layout, workspaceId, tab }: PluginWorkspaceP
   const previous = state.previous && state.selected && state.previous !== state.selected ? state.previous : null;
   const compare =
     previous && mediaKindOf(previous) && mediaKindOf(previous) === mediaKindOf(state.selected!)
-      ? { path: previous, name: previous.split("/").pop() ?? previous, onSelect: (path: string) => update({ selected: path }) }
+      ? { path: previous, name: baseName(previous), onSelect: (path: string) => update({ selected: path }) }
       : null;
   const list = useRpc(listRpc);
   const status = useRpc(statusRpc);
@@ -587,7 +587,7 @@ export function MediaPanel({ theme, layout, workspaceId, tab }: PluginWorkspaceP
             <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
               <Pressable accessibilityRole="button" onPress={() => update({ dir: null })}>
                 <Text style={{ color: crumbs.length ? colors.accent : colors.foreground, fontSize: 12, fontWeight: "500" }}>
-                  {remotePrefix(base) ?? (relativeTo(workspaceRoot, base) === base ? base.split("/").filter(Boolean).at(-1) ?? "/" : t("panel.workspace"))}
+                  {remotePrefix(base) ?? (relativeTo(workspaceRoot, base) === base ? baseName(base) || "/" : t("panel.workspace"))}
                 </Text>
               </Pressable>
               {crumbs.map((crumb, index) => (

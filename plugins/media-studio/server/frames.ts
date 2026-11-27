@@ -98,7 +98,7 @@ export function saveFrame(
       folderBytes + png.length > MAX_FOLDER_BYTES
     )
       throw new Error("Saved frame storage quota reached");
-    const part = path.posix.join(dir.path, `.${randomUUID()}.part`);
+    const part = (dir.host.remote ? path.posix : path).join(dir.path, `.${randomUUID()}.part`);
     const reservation: SavedFrame = {
       ref: refOf(dir.host, part),
       size: png.length,

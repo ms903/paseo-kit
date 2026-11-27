@@ -1,268 +1,43 @@
-# paseo-kit
+# ms903 的 Paseo 插件库
 
-[![typecheck](https://github.com/ms903/paseo-kit/actions/workflows/typecheck.yml/badge.svg)](https://github.com/ms903/paseo-kit/actions/workflows/typecheck.yml)
-[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[English](README.en.md) · [维护指南](docs/maintenance.md) · [更新记录](CHANGELOG.md)
 
-English | [简体中文](README.zh-CN.md)
+这里是 ms903 维护和发布 Paseo 插件的仓库。本轮兼容基线是 **Paseo 0.18.1**。每个插件独立安装和更新，已有安装继续使用原来的插件 ID 和 Git 路径。[Paseo v0.18.1](https://github.com/getpaseo/paseo/releases/tag/v0.18.1)
 
-Fork of [a31521424/paseo-kit](https://github.com/a31521424/paseo-kit).
-
-A collection of [Paseo](https://paseo.sh) plugins. Each plugin lives in `plugins/<id>/` and is a
-complete, self-contained Paseo plugin project.
-
-## Plugins
-
-| ID | Name | What it does |
+| 插件 | 用途 | 使用条件 |
 | --- | --- | --- |
-| [`host-monitor`](plugins/host-monitor) | Host monitor | CPU, RAM, GPU, disk and network readings for the daemon host in the sidebar footer and popover. |
-| [`ccusage-stats`](plugins/ccusage-stats) | Token usage | Token usage and estimated cost of your coding agents via [ccusage](https://github.com/ccusage/ccusage): today's total, day/week/month breakdown by agent, and a per-session composer pill. |
-| [`file-download`](plugins/file-download) | Download file | Cmd+S or Ctrl+S downloads the file you are previewing, including files outside the workspace such as `/tmp`. |
-| [`tab-recovery`](plugins/tab-recovery) | Closed agents | Lists the agents whose tab was closed (which archives them) in the current workspace and reopens one with a press. |
-| [`media-studio`](plugins/media-studio) | Media studio | Review the images, video and audio agents make: chat cards, a streaming player with a filmstrip and waveform timeline, timecoded notes to the agent, large uploads and downloads, files on SSH hosts. |
-| [`paseo-latex-companion`](plugins/paseo-latex-companion) | LaTeX Companion for Better Paseo | Typesets LaTeX inline, in display blocks, and inside Better Paseo tables on web and desktop. |
+| [tab-recovery](plugins/tab-recovery) | 找回当前工作区已归档的主 agent，并重新打开标签页 | 从命令面板选择 **Reopen a closed agent** |
+| [media-studio](plugins/media-studio) | 在会话中审阅图片、视频和音频，发送带时间码的批注，传输媒体文件 | 播放和上传使用网页或桌面端；预览和转码需要 daemon 主机上的 FFmpeg |
+| [file-download](plugins/file-download) | 用 Ctrl+S 或 Cmd+S 下载当前预览的文件，包括工作区外的预览 | 网页或桌面端；光标位于文件编辑器时继续保存编辑 |
+| [paseo-latex-companion](plugins/paseo-latex-companion) | 在 Better Paseo 接管的 Markdown 正文及表格中排版公式 | 网页或桌面端，同时启用官方 Better Paseo 及其 Markdown 设置 |
+| [host-monitor](plugins/host-monitor) | 在侧边栏查看所选主机的 CPU、内存、磁盘、网络和 GPU 指标 | GPU 指标取决于主机硬件及驱动 |
+| [ccusage-stats](plugins/ccusage-stats) | 查看 agent 的 token 用量、估算费用和历史报表 | daemon 使用 npm 安装锁定的 ccusage 运行时依赖 |
 
-### host-monitor
+## 安装和更新
 
-- The sidebar footer shows CPU, RAM, disk, network and the busiest detected GPU's utilization.
-- Yellow above 70%, red above 90%; on a narrow sidebar network speed is dropped first, then disk.
-- Popover with about three minutes of history per metric, available space on each local disk, uptime and load average.
-- The popover and **Details** show each detected GPU. The details page includes the host picker when Host Monitor is installed on multiple hosts.
-- Visible monitors share CPU and network readings for 2 seconds and GPU readings for 10 seconds. Hosts with no detected GPU are checked at most once a minute. History stays in memory.
+在目标 daemon 的 **Settings → Plugins** 启用插件。按需运行对应行即可安装。
 
-### ccusage-stats
-
-- Sidebar footer line with today's tokens, a meter of today's cost against your typical day (median of active days in the last 28) and estimated cost.
-- Popover with day / week / month totals, change against the previous period and a stacked chart;
-  the day view also states your typical day and average daily cost.
-- Full **Token usage** screen (also in the Command Center): 30 days / 12 weeks / 12 months of history,
-  cost per million tokens, cache hit rate, per-agent and per-model breakdown, recent sessions.
-- A composer pill shows the token total of the current provider session, including Antigravity conversations started in Paseo.
-- Antigravity app, IDE and CLI usage is read from local conversation databases, including live WAL updates. Costs use Google and Anthropic public prices for input, output and cache tokens.
-- Each host keeps up to 13 MiB of compressed usage statistics under `$PASEO_HOME/cache/ccusage-stats/`. After an update or restart the saved report opens while recent usage refreshes in the background.
-- Counts every agent ccusage supports (Claude Code, Codex, Gemini CLI, OpenCode, Amp, ...).
-  Use **Update prices** in Token usage to refresh the public model prices from Models.dev.
-
-### file-download
-
-- Cmd+S on macOS or Ctrl+S on Windows and Linux downloads the file preview you are looking at,
-  including files outside the workspace such as `/tmp` output. "Download current file" in the
-  Command Center does the same.
-- On any other tab, such as an agent, the shortcut does nothing. Inside Paseo's file editor it still
-  saves your edits.
-- "Open downloads" lists the downloads since the page loaded; nothing is discovered or listed on its own.
-- Transfers go in 4 MB pieces over the Paseo connection, so they work through relays and reverse
-  proxies. Up to 1 GB per file. Desktop app and browser only.
-
-### tab-recovery
-
-- Closing an agent's tab archives it. The **Closed agents** panel lists the archived top-level
-  agents of the workspace, newest first.
-- Reopen unarchives the agent, resumes its session and opens its tab again, like the Unarchive button
-  in an archived agent's tab. The daemon side runs `paseo agent reload`, so the `paseo` CLI must be on
-  the daemon's PATH.
-
-### media-studio
-
-- Agents get a `preview_media` tool that shows a render, cut, frame or mix in the chat as a card
-  with a player. After each turn, a card below the reply collects the media the turn showed and the
-  media files it created or changed.
-- The player streams from the daemon, so large files start in about a second and seek instantly.
-  H.264 plays as it is; other formats become a 720p proxy on the fly (VideoToolbox or NVENC when
-  available). Timeline with timecode, filmstrip, waveform, hover frames, frame steps, in and out
-  points, loop and editor keys.
-- Long-GOP renders seek in about a second: the stretch from the playhead to the next keyframe is
-  encoded on the fly at near-original quality, then the original takes over.
-- Editor tools: playback position, in/out and speed remembered per file (across tab switches,
-  reloads and re-renders), type a timecode to jump, flip between two versions at the same moment,
-  safe-area and 9:16 / 4:5 / 1:1 crop guides, and EBU R128 loudness and true peak against −14 LUFS.
-- Notes to an agent carry the file, timecode, in/out range and the current frame as an image. They
-  can be sent while the agent works (they join its current task), are listed and pinned on the
-  timeline, and copy out as a timecoded list.
-- **Media** panel: recent media or folders, uploads by button or drag and drop, downloads written to
-  disk as they arrive. Transfers go over the Paseo connection in 4 MB pieces, so direct connections,
-  reverse proxies and tunnels work without an extra port.
-- Files on an SSH host (`alias:/path`, aliases from `~/.ssh/config`) are processed by that host's
-  ffmpeg, for agents that render on a GPU server.
-- Needs ffmpeg on the daemon host and Paseo 0.15.3 or later. Playback and uploads need the desktop
-  app or a browser.
-
-See each plugin's `OVERVIEW.md` for details and limits.
-
-## Requirements
-
-- Paseo **0.11.1** or later (daemon and app); **0.15.3** or later for `media-studio`.
-- Plugins enabled on the daemon: **Settings → Plugins → Enable plugins**, or `"pluginsEnabled": true`
-  in the daemon's `config.json` followed by `paseo reload`.
-- Node.js with npm on the daemon host (for installing dependencies).
-
-## Dependencies
-
-paseo-kit does not vendor any third-party code. Dependencies are declared per plugin in
-`plugins/<id>/package.json` and pinned by the committed `package-lock.json`.
-
-**Runtime environment**
-
-| Dependency | Version | Notes |
-| --- | --- | --- |
-| [Paseo](https://github.com/getpaseo/paseo) daemon and app | >= 0.11.1 | Declared as `requirements.paseo` in each `paseo-plugin.json`. |
-| Node.js and npm | Node 22.13+ | On the daemon host, for installing dependencies and the `ccusage-stats` build step. |
-| `paseo` CLI | same as the daemon | On the daemon's PATH, for `tab-recovery` to restore agents. Present with a standard install. |
-| Linux `/proc` | - | `host-monitor` network speed, available memory and the disk list. Outside Linux the disk display uses the root volume. |
-| ffmpeg (ffprobe optional), Python 3 on SSH hosts | 6 or later recommended | On the daemon host for `media-studio`, with libx264; also on any SSH host whose files it previews. |
-| `ssh` client | - | Only for `media-studio` files on SSH hosts; keys must work without a prompt. |
-
-**Runtime npm dependencies** (installed with the plugin)
-
-| Package | Version | License | Used by |
-| --- | --- | --- | --- |
-| [`ccusage`](https://github.com/ccusage/ccusage) | 20.0.51 | MIT | `ccusage-stats` |
-| `@ccusage/ccusage-<platform>-<arch>` | 20.0.51 | MIT | `ccusage-stats` (native binary, optional dependency of `ccusage`) |
-
-`host-monitor`, `file-download`, `tab-recovery` and `media-studio` have no runtime npm dependencies.
-
-**Provided by Paseo at runtime** (`devDependencies`, installed locally only for typechecking)
-
-| Package | Version | License |
-| --- | --- | --- |
-| [`@getpaseo/plugin`](https://github.com/getpaseo/paseo) | 0.11.1 (`media-studio`: 0.15.3) | Apache-2.0 (Paseo) |
-| `react` | 19.1.0 | MIT |
-| `react-native` | 0.81.5 | MIT |
-| `@tanstack/react-query` | ^5.90.11 | MIT |
-| `zod` | ^4.4.3 | MIT |
-
-**Development only**
-
-| Package | Version | License |
-| --- | --- | --- |
-| `typescript` | ^5.9.3 | Apache-2.0 |
-| `@types/node` | ^22.0.0 | MIT |
-| `@types/react` | ~19.2.0 | MIT |
-
-## Install
-
-### Install with an agent
-
-Copy this prompt into a Paseo agent running on the target machine. It installs or updates all
-plugins from GitHub. To install only some, remove the other IDs from step 3.
-
-```text
-Install the paseo-kit Paseo plugins from https://github.com/ms903/paseo-kit on this machine's Paseo daemon. Never restart the Paseo daemon; it would kill running agents.
-1. Run `paseo --version` and require 0.11.1 or later. Run `npm --version`; npm must be on the daemon's PATH because ccusage-stats runs `npm ci --omit=dev` when it installs.
-2. Get `home` from `paseo daemon status --json` and read `pluginsEnabled` in `<home>/config.json` (missing means false). If it is not true, stop and ask me before enabling it, and warn me that plugins are trusted, unsandboxed code with access to this machine. If I agree, set only that field to true, keep the rest of the file, and run `paseo reload --json`.
-3. Run `paseo plugin ls`. For each ID in `host-monitor`, `ccusage-stats`, `file-download`, `tab-recovery` and `media-studio`: if it is not installed, run `paseo plugin install github:ms903/paseo-kit:plugins/<id>`; if its SOURCE is already this GitHub repository, run `paseo plugin update <id> --yes`; if it is installed from any other source, ask me before removing and reinstalling it.
-4. Run `paseo plugin ls` and require every plugin to be `running` with no error. If one fails, show me its error and `paseo plugin logs <id>`.
-5. Report each plugin's SOURCE and REVISION.
+```sh
+paseo plugin install git:ms903/paseo-kit:plugins/tab-recovery
+paseo plugin install git:ms903/paseo-kit:plugins/media-studio
+paseo plugin install git:ms903/paseo-kit:plugins/file-download
+paseo plugin install git:ms903/paseo-kit:plugins/paseo-latex-companion
+paseo plugin install git:ms903/paseo-kit:plugins/host-monitor
+paseo plugin install git:ms903/paseo-kit:plugins/ccusage-stats
 ```
 
-### From GitHub
+已从本仓库安装的插件可以原地更新。以标签恢复为例，先查看更新，再应用并确认当前版本。
 
-```bash
-paseo plugin install github:ms903/paseo-kit:plugins/host-monitor
-paseo plugin install github:ms903/paseo-kit:plugins/ccusage-stats
-paseo plugin install github:ms903/paseo-kit:plugins/file-download
-paseo plugin install github:ms903/paseo-kit:plugins/tab-recovery
-paseo plugin install github:ms903/paseo-kit:plugins/media-studio
-```
-
-`ccusage-stats` declares `build: [["npm", "ci", "--omit=dev"]]`, so Paseo installs the bundled
-ccusage binary from the committed lockfile. The other plugins only use host-provided libraries.
-Update later with `paseo plugin update <id>`.
-
-### From a local clone
-
-```bash
-git clone https://github.com/ms903/paseo-kit.git
-cd paseo-kit
-npm run install:all
-
-paseo plugin install "$PWD/plugins/host-monitor"
-paseo plugin install "$PWD/plugins/ccusage-stats"
-paseo plugin install "$PWD/plugins/file-download"
-paseo plugin install "$PWD/plugins/tab-recovery"
-paseo plugin install "$PWD/plugins/media-studio"
+```sh
+paseo plugin update tab-recovery --check
+paseo plugin update tab-recovery
 paseo plugin ls
 ```
 
-Paseo loads directory plugins from the source directory itself. If you move the clone, run
-`paseo plugin remove <id>` and install again from the new absolute path.
+Git 安装跟随记录的来源。若某个插件仍显示其他仓库为来源，请先核对安装记录和设置。需要重现某个版本时，在安装命令后加 `--ref <tag-or-commit>`，或运行 `paseo plugin update <id> --ref <tag-or-commit>`。[Paseo 的 Git 插件安装说明](https://github.com/getpaseo/paseo/blob/v0.18.1/docs/plugins.md#install-a-git-source)
 
-## Development
+## 开发和许可
 
-```bash
-npm test                       # regression tests
-npm run typecheck              # all plugins; or `npm run typecheck` inside plugins/<id>
-paseo plugin reload <id>       # load source changes
-paseo plugin ls                # require status "running" with no error
-paseo plugin logs <id>         # stdout/stderr of the plugin's daemon subprocess
-```
+每个插件的源码、manifest 和依赖锁文件都在 `plugins/<id>/`。根目录的检查命令、兼容性验证步骤和版本发布约定见[维护指南](docs/maintenance.md)。
 
-Do not restart the daemon to pick up plugin changes. `paseo plugin reload <id>` is enough, and a
-restart kills running agents.
-
-Client code must work on desktop and mobile: React Native primitives only, text colors from
-`theme.colors`, spacing from `layout.compact`. Audit client code with:
-
-```bash
-rg -n "document\.|window\.|localStorage|navigator\.|<[a-z]+[ >]|className=|onClick=" plugins/*/client/
-```
-
-TypeScript generics such as `useState<number | null>` also match. Anything else outside
-`client/web.ts` is a bug.
-
-### Repository layout
-
-```text
-paseo-kit/
-  package.json            root scripts only: install:all, typecheck
-  plugins/
-    <id>/
-      paseo-plugin.json   manifest: id, name, description, requirements.paseo
-      OVERVIEW.md         listing page shown inside Paseo
-      package.json
-      package-lock.json
-      tsconfig.json
-      index.client.tsx    app entry
-      index.server.ts     daemon entry
-      client/  server/  shared/
-```
-
-This repository intentionally does **not** use npm workspaces. Each plugin installs its own
-dependencies in `plugins/<id>/node_modules`. `ccusage-stats` looks for the native ccusage binary in
-its own plugin directory, so hoisting dependencies to the root would break it.
-
-### Adding a plugin
-
-```bash
-paseo plugin init "$PWD/plugins/<id>"
-cd plugins/<id>
-npm install
-```
-
-Then align it with the existing plugins: the same `@getpaseo/plugin` version and
-`requirements.paseo` range, the same `tsconfig.json`, a `package.json` `name` matching the ID, and a
-factual `OVERVIEW.md`. Add it to the plugin table above and to the CI matrix in
-`.github/workflows/typecheck.yml`.
-
-## Trust and security
-
-Paseo plugins are **trusted, unsandboxed code**. Server code runs as a daemon subprocess with full
-access to the daemon machine's files, processes, credentials and network. Client code runs inside the
-Paseo app. Read the source before installing any plugin, including these. Never commit credentials,
-and never log them from plugin code.
-
-## License
-
-Licensed under the [Apache License, Version 2.0](LICENSE), the same license as
-[Paseo](https://github.com/getpaseo/paseo). See [NOTICE](NOTICE). Third-party dependencies keep their
-own licenses, listed under [Dependencies](#dependencies).
-
-## Resource settings
-
-Media turn cards and composer scanning are opt-in. Configure SSH aliases explicitly in
-Media studio settings. Remote filesystem operations require Python 3, along with ffmpeg.
-
-Media storage limits: preview cache 1 GiB, review notes 64 MiB, saved frames 1 GiB across
-tracked files (512 MiB per folder), unfinished uploads 16 GiB and 64 tasks. Storage usage and
-cache cleanup are available in Media studio settings. Unfinished uploads expire after three
-days; remote deletion failures retain their cleanup record. Completed uploads remain user files.
-Browsers without streaming file saving use a 64 MiB memory limit.
+本仓库源自 [a31521424/paseo-kit](https://github.com/a31521424/paseo-kit)，保留了原作者署名和提交历史。项目采用 Apache-2.0。公式插件内置 KaTeX、Marked 和字体，其各自的许可证随源码分发。[LICENSE](LICENSE) · [NOTICE](NOTICE) · [第三方许可证](plugins/paseo-latex-companion/licenses)

@@ -50,16 +50,29 @@ const KIND_BY_EXTENSION = new Map<string, MediaKind>([
   ...IMAGE_EXTENSIONS.map((ext) => [ext, "image"] as const),
 ]);
 
+/** A native Windows drive or UNC path supplied by the daemon. */
+export function isWindowsPath(value: string): boolean {
+  return /^[a-z]:[\\/]/i.test(value) || value.startsWith("\\\\");
+}
+
+export function displayPath(value: string): string {
+  return isWindowsPath(value) ? value.replace(/\\/g, "/") : value;
+}
+
 export function baseName(path: string): string {
-  const trimmed = path.replace(/\/+$/, "");
+  const trimmed = displayPath(path).replace(/\/+$/, "");
   return trimmed.slice(trimmed.lastIndexOf("/") + 1) || trimmed;
 }
 
 export function dirName(path: string): string {
-  const trimmed = path.replace(/\/+$/, "");
+  const trimmed = displayPath(path).replace(/\/+$/, "");
   const index = trimmed.lastIndexOf("/");
+  if (isWindowsPath(path)) {
+    const root = /^[a-z]:\/|^\/\/[^/]+\/[^/]+\/?/i.exec(displayPath(path))?.[0];
+    if (root && index < root.length) return path.slice(0, root.length);
+  }
   if (index < 0) return ".";
-  return index === 0 ? "/" : trimmed.slice(0, index);
+  return index === 0 ? "/" : path.slice(0, index);
 }
 
 /** Lowercase, without the dot; empty when the name has none. */
@@ -73,17 +86,25 @@ export function mediaKindOf(path: string): MediaKind | null {
   return KIND_BY_EXTENSION.get(extensionOf(path)) ?? null;
 }
 
-/** POSIX join for display and for paths the daemon resolves again. */
+/** Join paths using the daemon folder’s separator. */
 export function joinPath(dir: string, name: string): string {
   if (!dir || dir === ".") return name;
+  if (isWindowsPath(dir) && dir.includes("\\")) {
+    return dir.replace(/[\\/]+$/, "") + "\\" + name.replace(/\//g, "\\");
+  }
   return dir.endsWith("/") ? `${dir}${name}` : `${dir}/${name}`;
 }
 
 /** `path` relative to `root` when it is inside it, else `path` unchanged. */
 export function relativeTo(root: string | null | undefined, path: string): string {
   if (!root) return path;
-  const prefix = root.endsWith("/") ? root : `${root}/`;
-  return path.startsWith(prefix) ? path.slice(prefix.length) : path;
+  const folder = displayPath(root);
+  const file = displayPath(path);
+  const prefix = folder.endsWith("/") ? folder : folder + "/";
+  const inside = isWindowsPath(root) && isWindowsPath(path)
+    ? file.toLowerCase().startsWith(prefix.toLowerCase())
+    : file.startsWith(prefix);
+  return inside ? file.slice(prefix.length) : path;
 }
 
 /** The timestamp of the frame that contains `seconds`. */

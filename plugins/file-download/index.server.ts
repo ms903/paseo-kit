@@ -18,7 +18,8 @@ type Paseo = PluginHandlerContext["paseo"];
 
 /** The daemon keeps its server ID in $PASEO_HOME/server-id unless PASEO_SERVER_ID overrides it. */
 async function readServerId(): Promise<string | null> {
-  if (process.env.PASEO_SERVER_ID) return process.env.PASEO_SERVER_ID;
+  const override = process.env.PASEO_SERVER_ID?.trim();
+  if (override) return override;
   const home = process.env.PASEO_HOME ?? path.join(os.homedir(), ".paseo");
   const id = await fs.readFile(path.join(home, "server-id"), "utf8").catch(() => "");
   return id.trim() || null;
@@ -27,7 +28,7 @@ async function readServerId(): Promise<string | null> {
 async function resolveTabPath(paseo: Paseo, workspaceId: string, tabPath: string): Promise<string> {
   if (tabPath === "~" || tabPath.startsWith("~/")) return path.join(os.homedir(), tabPath.slice(1));
   if (path.isAbsolute(tabPath)) return path.normalize(tabPath);
-  const workspace = (await paseo.workspaces.list({ page: { limit: 200 } })).entries.find((entry) => entry.id === workspaceId);
+  const workspace = await paseo.workspaces.ref(workspaceId).refresh();
   const root = workspace?.workspaceDirectory ?? workspace?.projectRootPath;
   if (!root) throw new Error("This workspace is not open on the daemon.");
   return path.resolve(root, tabPath);

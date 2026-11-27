@@ -1,0 +1,7 @@
+{
+  "name": "paseo-kit-host-smoke",
+  "private": true,
+  "devDependencies": {
+    "@getpaseo/cli": "0.18.1"
+  }
+}

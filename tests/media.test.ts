@@ -309,3 +309,171 @@ test("portable content hashing matches SHA-256 across padding and chunk boundari
     );
   }
 });
+
+test("composer pills skip disabled scans and batch every active project when enabled", async (t) => {
+  const { contributeMediaPills } = await import("../plugins/media-studio/client/pill");
+  let observer: any;
+  let setting: boolean | null = false;
+  const calls: { dirs: string[]; fresh: boolean }[] = [];
+  const visibility = new Map<string, boolean>();
+  t.mock.timers.enable({ apis: ["setInterval", "setTimeout"] });
+  const client = {
+    paseo: { agents: { list: async () => ({ subscription: { subscribe: (value: unknown) => { observer = value; } } }) } },
+    addComposerPill: ({ agentId }: { agentId: string }) => ({
+      update: ({ visible }: { visible: boolean }) => visibility.set(agentId, visible),
+      remove: () => visibility.delete(agentId),
+    }),
+    rpc: async ({ name }: { name: string }, input: { dirs: string[]; fresh: boolean }) => {
+      if (name === "settings.media-studio.read") {
+        if (setting === null) throw new Error("disconnected");
+        return { status: "ready", values: { composerPill: setting } };
+      }
+      assert.equal(name, "media.project.summary");
+      calls.push(input);
+      return { projects: input.dirs.map(dir => ({ dir, isMedia: true, image: 25, video: 0, audio: 0 })) };
+    },
+  };
+  const stop = contributeMediaPills(client as any);
+  const flush = () => new Promise<void>(resolve => setImmediate(resolve));
+  const entries = Array.from({ length: 205 }, (_, n) => ({
+    agent: { id: String(n), cwd: "/dir/" + n, workspaceId: "ws", status: "running" },
+  }));
+  try {
+    await flush();
+    observer.snapshot({ entries });
+    await flush();
+    assert.equal(calls.length, 0);
+    setting = null;
+    t.mock.timers.tick(90_000);
+    await flush();
+    assert.equal(calls.length, 0);
+    setting = true;
+    t.mock.timers.tick(90_000);
+    await flush();
+    assert.deepEqual(calls.map(call => [call.dirs.length, call.fresh]), [[200, false], [5, false]]);
+    assert.equal([...visibility.values()].filter(Boolean).length, entries.length);
+
+    calls.length = 0;
+    for (const { agent } of entries) {
+      observer.update({ type: "agent_update", payload: { kind: "upsert", agent: { ...agent, status: "idle" } } });
+    }
+    t.mock.timers.tick(3_000);
+    await flush();
+    assert.deepEqual(calls.map(call => [call.dirs.length, call.fresh]), [[200, true], [5, true]]);
+    setting = false;
+    calls.length = 0;
+    t.mock.timers.tick(90_000);
+    await flush();
+    assert.equal(calls.length, 0);
+    assert.ok([...visibility.values()].every(value => !value));
+  } finally {
+    stop();
+  }
+});
+
+test("a plugin reload continues active and queued uploads only on the original daemon", async () => {
+  const { build } = await import("esbuild");
+  const vm = await import("node:vm");
+  const directory = path.resolve("plugins/media-studio/client");
+  const bundle = await build({
+    stdin: {
+      contents: 'export * from "./transfers"; export {setPluginClient} from "./state";',
+      resolveDir: directory,
+    },
+    external: ["react-native"],
+    bundle: true,
+    platform: "browser",
+    format: "iife",
+    globalName: "media",
+    write: false,
+  });
+  const page = vm.createContext({
+    require: () => ({ Platform: { OS: "web" } }),
+    navigator: {}, Blob, console, setTimeout, clearTimeout, btoa,
+  });
+  const load = (list: () => Promise<unknown>, rpc = async (_method: any, _input: any): Promise<any> => {}) => {
+    vm.runInContext(bundle.outputFiles[0].text, page);
+    const api = page.media;
+    api.setPluginClient({ paseo: { hosts: { list } }, rpc });
+    return api;
+  };
+  const identify = (serverId: string) => async () => ({ self: { serverId } });
+  const files = ["a", "b", "c", "d"].map(name => new File(["x"], name + ".png"));
+  const original = new AbortController();
+  const writes: (() => void)[] = [];
+  const began: string[] = [];
+  const old = load(identify("daemon-a"), async (method, input) => {
+    if (method.name === "upload.begin") {
+      began.push(input.name);
+      return { uploadId: input.name, received: [], receivedBytes: 0 };
+    }
+    if (method.name === "upload.write") {
+      await new Promise<void>(resolve => writes.push(resolve));
+      return { received: 1 };
+    }
+    throw new Error("old instance called " + method.name);
+  });
+  await old.adoptUploads(original.signal);
+  const pending = old.uploadFiles(files, "/renders");
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(writes.length, 2);
+  original.abort();
+  old.handOverUploads();
+  for (const release of writes) release();
+  await pending;
+  assert.deepEqual(began, files.slice(0, 2).map(file => file.name));
+
+  const foreign = load(identify("daemon-b"), async () => { throw Error("wrong daemon"); });
+  await foreign.adoptUploads(new AbortController().signal);
+  foreign.handOverUploads();
+  let resolveId!: (value: unknown) => void;
+  const stale = load(() => new Promise(resolve => { resolveId = resolve; }));
+  const disposed = new AbortController();
+  const lookup = stale.adoptUploads(disposed.signal);
+  disposed.abort();
+  stale.handOverUploads();
+  resolveId({ self: { serverId: "daemon-a" } });
+  await lookup;
+  assert.equal(stale.currentServerId(), null);
+
+  const resumed: (string | null)[] = [];
+  const finished: string[] = [];
+  const next = load(identify("daemon-a"), async (method, input) => {
+    if (method.name === "upload.begin") {
+      resumed.push(input.uploadId);
+      return { uploadId: input.name, received: [], receivedBytes: 0 };
+    }
+    if (method.name === "upload.write") return { received: 1 };
+    assert.equal(method.name, "upload.finish");
+    finished.push(input.uploadId);
+    return { path: "/renders/" + input.uploadId };
+  });
+  await next.adoptUploads(new AbortController().signal);
+  assert.deepEqual(resumed, ["a.png", "b.png", null, null]);
+  assert.deepEqual(finished.sort(), files.map(file => file.name));
+});
+
+test("Windows tool discovery and media labels handle drive and UNC paths", async () => {
+  const { baseName, extensionOf, joinPath, relativeTo, dirName } = await import("../plugins/media-studio/shared/media");
+  const { findLocalBinary } = await import("../plugins/media-studio/server/hosts");
+  const drive = String.raw`C:\Cuts\Episode 1`;
+  const share = String.raw`\\studio\renders\episode`;
+  assert.equal(baseName(drive + "\\cut.mp4"), "cut.mp4");
+  assert.equal(extensionOf(drive + "\\file"), "");
+  assert.equal(dirName("C:\\cut.mp4"), "C:\\");
+  assert.equal(joinPath(share, "frames/one.png"), share + "\\frames\\one.png");
+  assert.equal(relativeTo(drive, "c:/cuts/Episode 1/frames/cut.png"), "frames/cut.png");
+  assert.equal(relativeTo(share, share + "\\v2\\cut.mp4"), "v2/cut.mp4");
+  assert.equal(relativeTo("/cut", String.raw`/cut/a\b.png`), String.raw`a\b.png`);
+  assert.equal(baseName(String.raw`gpu:/cut/a\b.png`), String.raw`a\b.png`);
+
+  const root = await temp();
+  try {
+    const tool = path.join(root, "media-tool-fixture");
+    await writeFile(tool + ".exe", "", { mode: 0o755 });
+    assert.equal(await findLocalBinary("", "media-tool-fixture", [tool], "win32"), tool + ".exe");
+    assert.equal(await findLocalBinary("", "media-tool-fixture", [tool], "linux"), null);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

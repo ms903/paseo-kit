@@ -4,6 +4,6 @@ Closing an agent's tab, for example with Ctrl+W or Cmd+W, archives the agent and
 
 Press an agent to reopen it. The plugin unarchives the agent, resumes its session with the full history, and opens its tab again once the app shows the agent as running. This is the same request as the Unarchive button in an archived agent's tab. Subagents are not listed, because closing a subagent's tab only hides it.
 
-Paseo's plugin SDK has no unarchive call, so the daemon side runs `paseo agent reload <id>`. The `paseo` CLI must be on the daemon's PATH, which it is for a standard install. The plugin only reloads agents that are archived and belong to the workspace the panel shows, so it never restarts an agent that is still open.
+On Paseo 0.18.1, the plugin reads the agent from the connected daemon and calls the SDK's `reload()` method after confirming that it is an archived top-level agent in this workspace. Older hosts that lack this method use `paseo agent reload <id>` and need a matching CLI on the daemon's PATH. The panel lists up to 50 agents and refreshes its archived-agent cache every 30 seconds. Private background agents stay hidden.
 
 Without the plugin you can restore an agent from **History** in the sidebar: open the archived agent, then press Unarchive in its tab. To stop closing tabs by accident, rebind or unassign "Close current tab" in Paseo's keyboard shortcut settings.

@@ -1,0 +1,75 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      latest_paseo:
+        description: Smoke-test the latest published Paseo CLI instead of the locked version.
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  validation:
+    name: Validate (${{ matrix.os }}, Node ${{ matrix.node }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            node: 22
+          - os: ubuntu-latest
+            node: 24
+          - os: windows-latest
+            node: 24
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            plugins/*/package-lock.json
+      - run: npm ci
+      - run: npm run install:all
+      - run: npm run typecheck
+      - run: npm run check:builds
+      - run: npm run check:mobile
+      # Some shared server fixtures use POSIX symlinks and python3.
+      - if: runner.os == 'Linux'
+        run: npm test
+      - if: runner.os == 'Windows'
+        run: npm run test:plugins
+      - name: Test Windows downloads
+        if: runner.os == 'Windows'
+        run: node --import tsx --test tests/downloads.test.ts
+      - name: Test Windows media paths and executable discovery
+        if: runner.os == 'Windows'
+        run: node --import tsx --test --test-name-pattern="Windows tool discovery" tests/media.test.ts
+
+  host-smoke:
+    name: Install plugins in a Paseo daemon
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            plugins/*/package-lock.json
+            scripts/host-smoke/package-lock.json
+      - if: inputs.latest_paseo != true
+        run: npm ci --prefix scripts/host-smoke
+      - if: inputs.latest_paseo == true
+        run: npm install --prefix scripts/host-smoke --no-save --package-lock=false @getpaseo/cli@latest
+      - run: npm run smoke:host
