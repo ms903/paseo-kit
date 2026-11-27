@@ -4,22 +4,30 @@ import type {
   PluginClientContext,
 } from "@getpaseo/plugin/client";
 import { Icon } from "@getpaseo/plugin/client/react-native";
+import { useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { Pressable, Text, View } from "react-native";
 import { PARENT_AGENT_LABEL, sessionUsageRpc, type SessionMatch } from "../shared/usage";
 import { cacheHitRate, useSessionUsage } from "./data";
 import { agentLabel, formatAgo, formatCost, formatPercent, formatTokens, shortSessionId } from "./format";
 import { Composition, FONT, ModelRows } from "./summary";
+import { SessionSpeed, speedQueryKey } from "./speed";
+import { useSpeedMessages } from "./speed-messages";
+import { UsagePillIcon, type SpeedPillLabel } from "./speed-pill";
+import { createTurnSpeedRuntime, type TurnSpeedRuntime } from "./turn-speed";
 
 const PILL_ID = "session-usage";
 const PILL_REFRESH_MS = 60_000;
 const AFTER_TURN_DELAY_MS = 2_000;
 const BATCH_SIZE = 200;
 
-export function SessionUsageContent({ theme, host, layout, onUpdate, ...target }: PluginButtonContentProps & {
+export function SessionUsageContent({ theme, host, layout, onUpdate, turnSpeed, ...target }: PluginButtonContentProps & {
   onUpdate(match: SessionMatch): void;
+  turnSpeed?: TurnSpeedRuntime;
 }) {
   const agentId = target.context === "agent" ? target.agentId : "";
+  const { t } = useSpeedMessages();
+  const queryClient = useQueryClient();
   const { query, refresh } = useSessionUsage(host.id, agentId);
   const { data } = query;
   const match = data?.match;
@@ -42,15 +50,20 @@ export function SessionUsageContent({ theme, host, layout, onUpdate, ...target }
   }, [match, onUpdate]);
 
   return (
-    <View style={{ gap: 12, padding: layout.compact ? 4 : 0, minWidth: 260 }}>
+    <View style={{ gap: 12, padding: layout.compact ? 4 : 0, minWidth: layout.compact ? 0 : 260 }}>
       <View style={{ flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
-        <Text style={[muted, { flexGrow: 1 }]}>{!session && usage ? "Latest request" : "This session"}</Text>
+        <Text accessibilityRole="header" style={{ flexGrow: 1, fontSize: FONT.title, fontWeight: "600", color: theme.colors.foreground }}>
+          {t(!session && usage ? "latestRequest" : "sessionUsage")}
+        </Text>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Refresh session"
           accessibilityState={{ busy, disabled: busy }}
           disabled={busy || !agentId}
-          onPress={() => refresh.mutate()}
+          onPress={() => {
+            void queryClient.invalidateQueries({ queryKey: speedQueryKey(host.id, { agentId }) });
+            refresh.mutate();
+          }}
           style={({ pressed }) => ({
             flexDirection: "row", alignItems: "center", gap: 6, minHeight: 36,
             paddingHorizontal: 8, borderRadius: 7, borderWidth: 1, borderColor: theme.colors.border,
@@ -95,6 +108,7 @@ export function SessionUsageContent({ theme, host, layout, onUpdate, ...target }
           </View>
         </View>
       ) : null}
+      {agentId ? <SessionSpeed key={`${host.id}:${agentId}`} theme={theme} hostId={host.id} target={{ agentId }} runtime={turnSpeed} /> : null}
       {usage ? (
         <>
           <Composition theme={theme} usage={usage} />
@@ -127,15 +141,10 @@ export function SessionUsageContent({ theme, host, layout, onUpdate, ...target }
   );
 }
 
-function pillLabel(match: SessionMatch | undefined, child: boolean): {
-  visible: boolean;
-  label?: string;
-  title?: string;
-} {
+function pillLabel(match: SessionMatch | undefined) {
   if (match?.status !== "matched" || match.session.usage.totalTokens <= 0) {
-    return child || (match?.status === "pending" && match.canRefresh)
-      ? { visible: true, label: "Usage", title: "Session token usage" }
-      : { visible: false };
+    // Turn timing may be available before a provider records its first usage or price.
+    return { visible: true, label: "Usage", title: "Session token usage" };
   }
   const { usage, recorded } = match.session;
   const tokens = formatTokens(usage.totalTokens);
@@ -154,8 +163,25 @@ interface AgentLike {
   labels?: Readonly<Record<string, string>>;
 }
 
+interface SessionPill {
+  registration: PluginButtonRegistration;
+  match?: SessionMatch;
+  speed: Map<object, SpeedPillLabel>;
+  shown: ReturnType<typeof pillLabel>;
+}
+
+function paintPill(pill: SessionPill) {
+  const base = pillLabel(pill.match);
+  const live = pill.speed.values().next().value;
+  const next = live ? { ...base, label: live.label, title: `${base.title} · ${live.detail}` } : base;
+  if (next.label === pill.shown.label && next.title === pill.shown.title) return;
+  pill.shown = next;
+  pill.registration.update(next);
+}
+
 export function contributeSessionPills(client: PluginClientContext): () => void {
-  const pills = new Map<string, PluginButtonRegistration>();
+  const turnSpeed = createTurnSpeedRuntime(client);
+  const pills = new Map<string, SessionPill>();
   const agents = new Map<string, AgentLike>();
   const lifetime = new AbortController();
   let generation = 0;
@@ -164,8 +190,8 @@ export function contributeSessionPills(client: PluginClientContext): () => void 
   let refreshTimer: ReturnType<typeof setTimeout> | null = null;
 
   const updatePill = (match: SessionMatch) => {
-    const agent = agents.get(match.agentId);
-    if (agent) pills.get(match.agentId)?.update(pillLabel(match, !!agent.labels?.[PARENT_AGENT_LABEL]));
+    const pill = pills.get(match.agentId);
+    if (pill) { pill.match = match; paintPill(pill); }
   };
 
   const refresh = async () => {
@@ -198,45 +224,64 @@ export function contributeSessionPills(client: PluginClientContext): () => void 
   };
 
   const register = (agent: AgentLike) => {
-    if (lifetime.signal.aborted || !agent.workspaceId || agent.archivedAt) return false;
+    if (lifetime.signal.aborted) return false;
+    if (agent.archivedAt) {
+      unregister(agent.id);
+      return false;
+    }
+    turnSpeed.upsert(agent);
     const previous = agents.get(agent.id);
+    if (previous?.workspaceId !== agent.workspaceId) {
+      pills.get(agent.id)?.registration.remove();
+      pills.delete(agent.id);
+    }
     agents.set(agent.id, agent);
+    if (!agent.workspaceId) return false;
     const child = !!agent.labels?.[PARENT_AGENT_LABEL];
     if (pills.has(agent.id)) {
       // The provider may have established the session ID during the turn.
       if (child !== !!previous?.labels?.[PARENT_AGENT_LABEL]) {
-        pills.get(agent.id)?.update(pillLabel(undefined, child));
         scheduleRefresh(1_000);
       } else if (previous?.status === "running" && agent.status !== "running") {
         scheduleRefresh(AFTER_TURN_DELAY_MS);
       }
       return false;
     }
-    pills.set(
-      agent.id,
-      client.addComposerPill({
+    const shown = pillLabel(undefined);
+    const pill: SessionPill = {
+      shown,
+      speed: new Map(),
+      registration: client.addComposerPill({
         id: PILL_ID,
         workspaceId: agent.workspaceId,
         agentId: agent.id,
         button: {
-          icon: "Coins",
-          title: "Session token usage",
-          ...pillLabel(undefined, child),
-          behavior: { kind: "popover", Content: (props) => <SessionUsageContent {...props} onUpdate={updatePill} /> },
+          icon: ({ size, color }) => <UsagePillIcon size={size} color={color} agentId={agent.id} turnSpeed={turnSpeed} publish={publish} />,
+          ...shown,
+          behavior: { kind: "popover", Content: (props) => <SessionUsageContent {...props} onUpdate={updatePill} turnSpeed={turnSpeed} /> },
         },
       }),
-    );
+    };
+    function publish(mount: object, value?: SpeedPillLabel) {
+      if (pills.get(agent.id) !== pill) return;
+      if (value) pill.speed.set(mount, value);
+      else pill.speed.delete(mount);
+      paintPill(pill);
+    }
+    pills.set(agent.id, pill);
     return true;
   };
 
   const unregister = (agentId: string) => {
-    pills.get(agentId)?.remove();
+    turnSpeed.remove(agentId);
+    pills.get(agentId)?.registration.remove();
     pills.delete(agentId);
     agents.delete(agentId);
   };
 
   const removeAll = () => {
-    for (const pill of pills.values()) pill.remove();
+    turnSpeed.clearAgents();
+    for (const pill of pills.values()) pill.registration.remove();
     pills.clear();
     agents.clear();
   };
@@ -308,5 +353,6 @@ export function contributeSessionPills(client: PluginClientContext): () => void 
     clearInterval(interval);
     if (refreshTimer) clearTimeout(refreshTimer);
     removeAll();
+    turnSpeed.dispose();
   };
 }

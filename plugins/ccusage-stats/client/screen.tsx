@@ -193,13 +193,13 @@ function Body({
 
   return (
     <View onLayout={(event) => setWidth(event.nativeEvent.layout.width)} style={{ gap: 14 }}>
-      <View style={{ flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+      <View style={{ flexDirection: narrow ? "column" : "row", alignItems: narrow ? "flex-start" : "center", flexWrap: "wrap", gap: 8 }}>
         {options.length > 1 ? <Segmented theme={theme} options={options} value={kind} onChange={changeKind} accessibilityLabel="Period" /> : null}
-        <View style={{ flex: 1 }} />
-        {narrow ? null : updated}
+        <View style={{ flex: narrow ? undefined : 1, minWidth: 0, alignSelf: "stretch", justifyContent: "center" }}>
+          {updated}
+        </View>
         {actions}
       </View>
-      {narrow ? updated : null}
       {report.refreshing ? <UsageRefreshStatus theme={theme} progress={report.progress} /> : null}
       {report.refreshError && !report.refreshing ? (
         <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
@@ -296,7 +296,7 @@ export function UsageScreen({ theme, host, layout, params }: PluginScreenProps) 
     onError: () => toast.error("Could not update prices"),
   });
   const actions = (
-    <View style={{ alignSelf: "flex-end", flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
+    <View style={{ alignSelf: layout.compact ? "flex-start" : "flex-end", flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
       <RefreshUsageButton theme={theme} hostId={host.id} refreshing={!error && (isPending || !!data?.refreshing)} />
       <Pressable
         accessibilityRole="button"
@@ -310,7 +310,7 @@ export function UsageScreen({ theme, host, layout, params }: PluginScreenProps) 
           backgroundColor: hovered || pressed ? theme.colors.surface2 : theme.colors.surface1,
         })}
       >
-        <Icon name="RefreshCw" size={14} color={theme.colors.foregroundMuted} />
+        <Icon name="Tags" size={14} color={theme.colors.foregroundMuted} />
         <Text style={{ fontSize: FONT.body, color: theme.colors.foreground }}>
           {priceUpdate.isPending ? "Updating prices…" : "Update prices"}
         </Text>

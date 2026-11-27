@@ -8,6 +8,7 @@ import { SESSION_PAGE_SIZE, sessionListRpc, type UsageReport } from "../shared/u
 import { SwatchDot } from "./charts";
 import { agentSwatch } from "./data";
 import { agentLabel, formatCost, formatTokens, shortSessionId } from "./format";
+import { SessionSpeed } from "./speed";
 import { Composition, FONT, ModelRows, UsageAmounts, UsageTableHeader, usageColumns } from "./summary";
 
 type HoverState = PressableStateCallbackType & { hovered?: boolean };
@@ -194,6 +195,7 @@ export function SessionList({ theme, hostId, report, clock, narrow, period }: {
                 </Pressable>
                 {open ? (
                   <View style={{ gap: 10, marginVertical: 6, padding: 12, borderRadius: 6, backgroundColor: theme.colors.surface0 }}>
+                    <SessionSpeed theme={theme} hostId={hostId} target={{ sessionId: session.id, provider: session.agent }} clock={clock} />
                     <Text accessibilityRole="header" style={title}>Token breakdown</Text>
                     <Composition theme={theme} usage={session.usage} />
                     {session.models.length ? (

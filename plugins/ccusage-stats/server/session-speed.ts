@@ -105,17 +105,19 @@ export function createSessionSpeed({ now = Date.now, store = createUsageStore("U
   let generation = 0;
   let enriching = false;
 
-  function save(key: string, updates: SessionSpeedSample[]): Promise<void> {
+  function save(key: string, updates: SessionSpeedSample[]): Promise<boolean> {
     const currentGeneration = generation;
     const result = writes.then(async () => {
-      if (currentGeneration !== generation) return;
+      if (currentGeneration !== generation) return false;
       const previous = await recorded.get(key, STORE_REVISION) ?? [];
       const next = mergeSamples(previous, updates).slice(0, MAX_SAMPLES);
-      if (currentGeneration !== generation || JSON.stringify(previous) === JSON.stringify(next)) return;
+      if (currentGeneration !== generation) return false;
+      if (JSON.stringify(previous) === JSON.stringify(next)) return true;
       await recorded.set(key, STORE_REVISION, next);
       await recorded.flush();
+      return true;
     });
-    writes = result.catch(() => {});
+    writes = result.then(() => {}, () => {});
     return result;
   }
 
@@ -152,10 +154,9 @@ export function createSessionSpeed({ now = Date.now, store = createUsageStore("U
     const currentGeneration = generation;
     const target = await completion.sessionKey;
     if (!target || currentGeneration !== generation) return false;
-    await save(target, input.samples.map((sample) => ({
+    return save(target, input.samples.map((sample) => ({
       ...sample, measuredAt: completion.measuredAt, source: "observed",
     })));
-    return true;
   }
 
   function readHistory(agent: AgentHandle, session: SpeedSession) {
