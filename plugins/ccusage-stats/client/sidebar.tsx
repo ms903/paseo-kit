@@ -148,7 +148,7 @@ export function UsageSidebarItem({ theme, host, openPopover }: PluginSidebarItem
   );
 }
 
-export function UsagePopover({ theme, host, layout, openScreen }: PluginPopoverProps) {
+export function UsagePopover({ theme, host, layout, openScreen, close }: PluginPopoverProps) {
   const { data, error, isPending, preview, progress } = useUsageReport(host.id);
   const [requestedKind, setKind] = useState<UsageView>("daily");
   const [pickedKey, setPickedKey] = useState<string | null>(null);
@@ -234,10 +234,10 @@ export function UsagePopover({ theme, host, layout, openScreen }: PluginPopoverP
           {data.refreshing ? "Collecting all-time usage…" : "All-time usage unavailable. Refresh usage to retry."}
         </Text>
       ) : <AgentList theme={theme} order={data.agents} period={periods[selected]} />}
-      <Footer theme={theme} report={data} refresh={refresh} onMore={() => openScreen({
-        screenId: "usage",
-        params: pickedKey ? { kind, period: pickedKey } : { kind },
-      })} />
+      <Footer theme={theme} report={data} refresh={refresh} onMore={() => {
+        close();
+        openScreen({ screenId: "usage", params: pickedKey ? { kind, period: pickedKey } : { kind } });
+      }} />
     </View>
   );
 }

@@ -45,7 +45,7 @@ function SessionControl({ theme, icon, label, onPress, active, expanded, disable
   );
 }
 
-export function SessionList({ theme, hostId, report, agent, swatchOrder, clock, narrow, period }: {
+export function SessionList({ theme, hostId, report, agent, swatchOrder, clock, narrow, period, lifetime }: {
   theme: PluginTheme;
   hostId: string;
   report: UsageReport;
@@ -54,15 +54,18 @@ export function SessionList({ theme, hostId, report, agent, swatchOrder, clock, 
   clock: Intl.DateTimeFormat;
   narrow: boolean;
   period?: { since: string; until: string; label: string };
+  lifetime: boolean;
 }) {
   const [text, setText] = useState("");
   const [search, setSearch] = useState("");
   const [openDateFilter, setOpenDateFilter] = useState(false);
   const [withinPeriod, setWithinPeriod] = useState(false);
+  const [ranked, setRanked] = useState(true);
   const [page, setPage] = useState({ filter: "", offset: 0 });
   const [expanded, setExpanded] = useState<string | null>(null);
   const dateRange = withinPeriod ? period : undefined;
-  const filter = JSON.stringify([agent, text.trim(), dateRange?.since, dateRange?.until]);
+  const sort = lifetime && ranked ? "tokens" : undefined;
+  const filter = JSON.stringify([agent, text.trim(), dateRange?.since, dateRange?.until, sort]);
   const offset = page.filter === filter ? page.offset : 0;
   const list = useRpc(sessionListRpc);
   const ready = text.trim() === search;
@@ -78,7 +81,7 @@ export function SessionList({ theme, hostId, report, agent, swatchOrder, clock, 
     queryKey: ["usage-session-list", hostId, report.revision, filter, offset],
     queryFn: () => list({
       agent: agent ?? undefined, search: search || undefined,
-      since: dateRange?.since, until: dateRange?.until, offset,
+      since: dateRange?.since, until: dateRange?.until, sort, offset,
     }),
     enabled: ready,
     placeholderData: (previous, previousQuery) =>
@@ -90,7 +93,7 @@ export function SessionList({ theme, hostId, report, agent, swatchOrder, clock, 
     gcTime: 60_000,
   });
   const result = ready ? query.data : undefined;
-  const rows = result?.sessions ?? (agent === null && !text.trim() && !dateRange && offset === 0 ? report.recentSessions : []);
+  const rows = result?.sessions ?? (agent === null && !text.trim() && !dateRange && !sort && offset === 0 ? report.recentSessions : []);
   const first = result?.offset ?? 0;
   const total = result?.total ?? rows.length;
   const columns = narrow ? undefined : usageColumns(rows.map((session) => session.usage));
@@ -133,6 +136,11 @@ export function SessionList({ theme, hostId, report, agent, swatchOrder, clock, 
           <SessionControl theme={theme} icon="Calendar" active={!!dateRange}
             label={dateRange ? dateRange.label : "All dates"} expanded={openDateFilter}
             onPress={() => setOpenDateFilter(open => !open)} />
+        ) : null}
+        {lifetime ? (
+          <SessionControl theme={theme} icon={ranked ? "ArrowDownWideNarrow" : "Clock"} active={ranked}
+            label={ranked ? "Lifetime tokens" : "Recent activity"}
+            onPress={() => { setRanked(!ranked); setExpanded(null); }} />
         ) : null}
       </View>
       {openDateFilter && period ? (

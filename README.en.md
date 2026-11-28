@@ -12,7 +12,8 @@ ms903 maintains this collection against **Paseo 0.18.1**. Each plugin has its ow
 | [file-download](plugins/file-download) | Download the focused file preview on web and desktop with Ctrl+S or Cmd+S. The shortcut still saves edits inside the editor. |
 | [paseo-latex-companion](plugins/paseo-latex-companion) | Render inline, display and table formulas on web and desktop alongside official Better Paseo with its Markdown renderer enabled. |
 | [host-monitor](plugins/host-monitor) | Read CPU, memory, disk, network and available GPU metrics for the selected host. |
-| [ccusage-stats](plugins/ccusage-stats) | See token counts, output speed, estimated costs and historical usage for the selected session. Installation runs npm on the daemon host. |
+| [ccusage-stats](plugins/ccusage-stats) | Filter token and cost trends, an activity calendar and model breakdowns by agent source. See output speed in each session. Installation runs npm on the daemon host. |
+| [antigravity-artifacts](plugins/antigravity-artifacts) | Preview artifacts from the current Antigravity conversation and its Paseo child agents. Requires a Linux daemon and Paseo 0.18.1 or later. |
 
 ## Install and update
 
@@ -26,6 +27,8 @@ paseo plugin ls
 ```
 
 To install a specific revision, append `--ref <tag-or-commit>`. To return to a known revision of an existing Git installation, run `paseo plugin update <id> --ref <tag-or-commit>`. [Git source reference](https://github.com/getpaseo/paseo/blob/v0.18.1/docs/plugins.md#install-a-git-source)
+
+If you use Antigravity Console to manage accounts, turn off **Antigravity Console** under **Settings → Sidebar → Footer** to remove the extra 5H / 7D quota row. Continue switching accounts through the console’s existing controls.
 
 ## Configure in Paseo
 

@@ -41,6 +41,7 @@ export function filterUsageReport(report: UsageReport, agent: string | null | un
   return {
     ...report,
     agents: [agent],
+    activity: report.activity?.map(({ day, sources }) => ({ day, sources: sources.filter(row => row.agent === agent) })),
     sessionAgents: report.sessionAgents?.filter(id => id === agent),
     daily: report.daily.map(project),
     weekly: report.weekly.map(project),

@@ -150,6 +150,8 @@ function buildReport(
 ): UsageReport {
   const { from, allDates } = options;
   const firstDay = from ?? oldestReportDay(today);
+  const firstMs = keyMs(firstDay);
+  const byDay = new Map(raw.daily.map((row) => [row.period, row]));
   const total = allDates ? rollupDays(raw.daily.filter((row) => row.period <= today), "total")[0] : undefined;
   return {
     generatedAt,
@@ -160,6 +162,13 @@ function buildReport(
     daily: series("daily", raw.daily, today, from),
     weekly: series("weekly", raw.weekly, today, from),
     monthly: series("monthly", raw.monthly, today, from),
+    activity: Array.from({ length: (keyMs(today) - firstMs) / DAY_MS + 1 }, (_, index) => {
+      const day = dayKey(firstMs + index * DAY_MS);
+      const row = byDay.get(day);
+      const sources = row ? (row.agents ?? [row]).filter(({ totalTokens }) => totalTokens > 0)
+        .map(({ agent, totalTokens }) => ({ agent, tokens: totalTokens })) : [];
+      return { day, sources };
+    }),
     total: allDates ? periodOf(total ?? emptyRow("total", "all")) : undefined,
     recentSessions: sessions.slice(0, SESSION_PAGE_SIZE),
     refreshError: null,
@@ -356,7 +365,7 @@ export function createReportCache(scan = runCcusage, cacheDirectory?: string): R
       const lastChecked = report?.usageRefreshedAt;
       // Reuse a fresh, complete report even after the daemon restarts.
       const needsSessionIndex = browsingSessions && !snapshot?.sessionsComplete;
-      if (!needsSessionIndex && report?.total && !report.sessionsPending && !report.sessionRefreshError &&
+      if (!needsSessionIndex && report?.total && report.activity && !report.sessionsPending && !report.sessionRefreshError &&
         lastChecked !== undefined && lastChecked <= now && now - lastChecked < AUTO_REFRESH_MS) return;
     }
     running = true;
