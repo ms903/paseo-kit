@@ -1,0 +1,28 @@
+{
+  "id": "ms903/heartbeat-status",
+  "name": "Heartbeat Status",
+  "description": "Shows which Paseo agents have an active heartbeat, including heartbeats on descendant agents.",
+  "license": "Apache-2.0",
+  "categories": [
+    "utilities"
+  ],
+  "author": {
+    "github": "ms903"
+  },
+  "repository": {
+    "url": "https://github.com/ms903/paseo-kit",
+    "commit": "bad4dbabce6e23abf8fe52021e00efe83e5cf515"
+  },
+  "artifact": {
+    "kind": "git",
+    "remote": "https://github.com/ms903/paseo-kit.git",
+    "commit": "bad4dbabce6e23abf8fe52021e00efe83e5cf515",
+    "pluginPath": "plugins/heartbeat-status"
+  },
+  "media": [],
+  "submittedAt": "2026-11-27T22:00:44Z",
+  "reviewedAt": "2026-11-27T22:00:44Z",
+  "updatedAt": "2026-11-27T22:00:44Z",
+  "publishedAt": "2026-11-27T22:00:44Z",
+  "readme": "Shows which Paseo agents have an active heartbeat, including heartbeats on descendant agents.\n\nVersion 0.1.2. [Plugin documentation](https://github.com/ms903/paseo-kit/tree/bad4dbabce6e23abf8fe52021e00efe83e5cf515/plugins/heartbeat-status)"
+}

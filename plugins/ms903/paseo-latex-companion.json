@@ -1,0 +1,27 @@
+{
+  "id": "ms903/paseo-latex-companion",
+  "name": "LaTeX Companion for Better Paseo",
+  "description": "Render LaTeX inside Better Paseo web and desktop replies. Enable alongside the official Better Paseo plugin.",
+  "categories": [
+    "utilities"
+  ],
+  "author": {
+    "github": "ms903"
+  },
+  "repository": {
+    "url": "https://github.com/ms903/paseo-kit",
+    "commit": "4e2d90789a5b919cba127b565e898b283bb63cd8"
+  },
+  "artifact": {
+    "kind": "git",
+    "remote": "https://github.com/ms903/paseo-kit.git",
+    "commit": "4e2d90789a5b919cba127b565e898b283bb63cd8",
+    "pluginPath": "plugins/paseo-latex-companion"
+  },
+  "media": [],
+  "submittedAt": "2026-11-27T20:52:43Z",
+  "reviewedAt": "2026-11-27T20:52:43Z",
+  "updatedAt": "2026-11-27T20:52:43Z",
+  "publishedAt": "2026-11-27T20:52:43Z",
+  "readme": "Render LaTeX inside Better Paseo web and desktop replies. Enable alongside the official Better Paseo plugin.\n\nVersion 1.1.0. [Plugin documentation](https://github.com/ms903/paseo-kit/tree/4e2d90789a5b919cba127b565e898b283bb63cd8/plugins/paseo-latex-companion)"
+}

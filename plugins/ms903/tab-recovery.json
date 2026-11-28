@@ -1,0 +1,28 @@
+{
+  "id": "ms903/tab-recovery",
+  "name": "Closed agents",
+  "description": "Reopen agent tabs that were closed, and so archived, by accident",
+  "license": "Apache-2.0",
+  "categories": [
+    "utilities"
+  ],
+  "author": {
+    "github": "ms903"
+  },
+  "repository": {
+    "url": "https://github.com/ms903/paseo-kit",
+    "commit": "4e2d90789a5b919cba127b565e898b283bb63cd8"
+  },
+  "artifact": {
+    "kind": "git",
+    "remote": "https://github.com/ms903/paseo-kit.git",
+    "commit": "4e2d90789a5b919cba127b565e898b283bb63cd8",
+    "pluginPath": "plugins/tab-recovery"
+  },
+  "media": [],
+  "submittedAt": "2026-11-27T20:52:37Z",
+  "reviewedAt": "2026-11-27T20:52:37Z",
+  "updatedAt": "2026-11-27T20:52:37Z",
+  "publishedAt": "2026-11-27T20:52:37Z",
+  "readme": "Reopen agent tabs that were closed, and so archived, by accident\n\nVersion 0.1.1. [Plugin documentation](https://github.com/ms903/paseo-kit/tree/4e2d90789a5b919cba127b565e898b283bb63cd8/plugins/tab-recovery)"
+}

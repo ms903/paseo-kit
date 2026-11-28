@@ -1,0 +1,30 @@
+{
+  "id": "ms903/host-monitor",
+  "name": "Host monitor",
+  "description": "CPU, memory, GPU, disk and network usage of the daemon host in the sidebar footer",
+  "license": "Apache-2.0",
+  "categories": [
+    "utilities"
+  ],
+  "author": {
+    "github": "ms903"
+  },
+  "repository": {
+    "url": "https://github.com/ms903/paseo-kit",
+    "commit": "4e2d90789a5b919cba127b565e898b283bb63cd8"
+  },
+  "artifact": {
+    "kind": "git",
+    "remote": "https://github.com/ms903/paseo-kit.git",
+    "commit": "4e2d90789a5b919cba127b565e898b283bb63cd8",
+    "pluginPath": "plugins/host-monitor"
+  },
+  "media": [
+    "https://raw.githubusercontent.com/ms903/paseo-kit/4e2d90789a5b919cba127b565e898b283bb63cd8/plugins/host-monitor/assets/screenshot.png"
+  ],
+  "submittedAt": "2026-11-27T20:52:41Z",
+  "reviewedAt": "2026-11-27T20:52:41Z",
+  "updatedAt": "2026-11-27T20:52:41Z",
+  "publishedAt": "2026-11-27T20:52:41Z",
+  "readme": "CPU, memory, GPU, disk and network usage of the daemon host in the sidebar footer\n\nVersion 0.1.0. [Plugin documentation](https://github.com/ms903/paseo-kit/tree/4e2d90789a5b919cba127b565e898b283bb63cd8/plugins/host-monitor)"
+}

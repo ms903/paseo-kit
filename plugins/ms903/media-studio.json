@@ -1,0 +1,28 @@
+{
+  "id": "ms903/media-studio",
+  "name": "Media studio",
+  "description": "Review the images, video and audio your agents make: inline cards in the chat, a player with a filmstrip and waveform timeline, and uploads and downloads of large files",
+  "license": "Apache-2.0",
+  "categories": [
+    "utilities"
+  ],
+  "author": {
+    "github": "ms903"
+  },
+  "repository": {
+    "url": "https://github.com/ms903/paseo-kit",
+    "commit": "4e2d90789a5b919cba127b565e898b283bb63cd8"
+  },
+  "artifact": {
+    "kind": "git",
+    "remote": "https://github.com/ms903/paseo-kit.git",
+    "commit": "4e2d90789a5b919cba127b565e898b283bb63cd8",
+    "pluginPath": "plugins/media-studio"
+  },
+  "media": [],
+  "submittedAt": "2026-11-27T20:52:39Z",
+  "reviewedAt": "2026-11-27T20:52:39Z",
+  "updatedAt": "2026-11-27T20:52:39Z",
+  "publishedAt": "2026-11-27T20:52:39Z",
+  "readme": "Review the images, video and audio your agents make: inline cards in the chat, a player with a filmstrip and waveform timeline, and uploads and downloads of large files\n\nVersion 0.1.1. [Plugin documentation](https://github.com/ms903/paseo-kit/tree/4e2d90789a5b919cba127b565e898b283bb63cd8/plugins/media-studio)"
+}

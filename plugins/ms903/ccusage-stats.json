@@ -1,0 +1,31 @@
+{
+  "id": "ms903/ccusage-stats",
+  "name": "Token usage",
+  "description": "Token usage and cost of your coding agents, including Antigravity",
+  "license": "Apache-2.0",
+  "categories": [
+    "utilities"
+  ],
+  "author": {
+    "github": "ms903"
+  },
+  "repository": {
+    "url": "https://github.com/ms903/paseo-kit",
+    "commit": "4876268aed3520a42e3d69d8939e54c8a5ca6b38"
+  },
+  "artifact": {
+    "kind": "git",
+    "remote": "https://github.com/ms903/paseo-kit.git",
+    "commit": "4876268aed3520a42e3d69d8939e54c8a5ca6b38",
+    "pluginPath": "plugins/ccusage-stats"
+  },
+  "media": [
+    "https://raw.githubusercontent.com/ms903/paseo-kit/4876268aed3520a42e3d69d8939e54c8a5ca6b38/plugins/ccusage-stats/assets/screenshot.png",
+    "https://raw.githubusercontent.com/ms903/paseo-kit/4876268aed3520a42e3d69d8939e54c8a5ca6b38/plugins/ccusage-stats/assets/details.png"
+  ],
+  "submittedAt": "2026-11-28T20:47:52Z",
+  "reviewedAt": "2026-11-28T20:47:52Z",
+  "updatedAt": "2026-11-28T20:47:52Z",
+  "publishedAt": "2026-11-28T20:47:52Z",
+  "readme": "Token usage and cost of your coding agents, including Antigravity\n\nVersion 0.2.0. [Plugin documentation](https://github.com/ms903/paseo-kit/tree/4876268aed3520a42e3d69d8939e54c8a5ca6b38/plugins/ccusage-stats)"
+}

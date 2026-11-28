@@ -1,0 +1,34 @@
+{
+  "id": "ms903/antigravity-artifacts",
+  "name": "Antigravity Artifacts",
+  "description": "Find and preview artifacts from the current Antigravity agent and its Paseo child agents on a Linux daemon.",
+  "translations": {
+    "zh-CN": {
+      "name": "Antigravity 产物",
+      "description": "在 Linux daemon 上查看当前 Antigravity 会话及其 Paseo 子 Agent 的产物。"
+    }
+  },
+  "license": "Apache-2.0",
+  "categories": [
+    "utilities"
+  ],
+  "author": {
+    "github": "ms903"
+  },
+  "repository": {
+    "url": "https://github.com/ms903/paseo-kit",
+    "commit": "4876268aed3520a42e3d69d8939e54c8a5ca6b38"
+  },
+  "artifact": {
+    "kind": "git",
+    "remote": "https://github.com/ms903/paseo-kit.git",
+    "commit": "4876268aed3520a42e3d69d8939e54c8a5ca6b38",
+    "pluginPath": "plugins/antigravity-artifacts"
+  },
+  "media": [],
+  "submittedAt": "2026-11-28T20:47:54Z",
+  "reviewedAt": "2026-11-28T20:47:54Z",
+  "updatedAt": "2026-11-28T20:47:54Z",
+  "publishedAt": "2026-11-28T20:47:54Z",
+  "readme": "Find and preview artifacts from the current Antigravity agent and its Paseo child agents on a Linux daemon.\n\nVersion 0.1.0. [Plugin documentation](https://github.com/ms903/paseo-kit/tree/4876268aed3520a42e3d69d8939e54c8a5ca6b38/plugins/antigravity-artifacts)"
+}

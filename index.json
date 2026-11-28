@@ -1,0 +1,243 @@
+{
+  "schemaVersion": 1,
+  "registry": {
+    "name": "Paseo Kit",
+    "url": "https://raw.githubusercontent.com/ms903/paseo-kit/plugin-registry"
+  },
+  "categories": [
+    {
+      "slug": "utilities",
+      "label": "Utilities"
+    }
+  ],
+  "plugins": [
+    {
+      "id": "ms903/antigravity-artifacts",
+      "name": "Antigravity Artifacts",
+      "description": "Find and preview artifacts from the current Antigravity agent and its Paseo child agents on a Linux daemon.",
+      "translations": {
+        "zh-CN": {
+          "name": "Antigravity 产物",
+          "description": "在 Linux daemon 上查看当前 Antigravity 会话及其 Paseo 子 Agent 的产物。"
+        }
+      },
+      "license": "Apache-2.0",
+      "categories": [
+        "utilities"
+      ],
+      "author": {
+        "github": "ms903"
+      },
+      "repository": {
+        "url": "https://github.com/ms903/paseo-kit",
+        "commit": "4876268aed3520a42e3d69d8939e54c8a5ca6b38"
+      },
+      "artifact": {
+        "kind": "git",
+        "remote": "https://github.com/ms903/paseo-kit.git",
+        "commit": "4876268aed3520a42e3d69d8939e54c8a5ca6b38",
+        "pluginPath": "plugins/antigravity-artifacts"
+      },
+      "media": [],
+      "submittedAt": "2026-11-28T20:47:54Z",
+      "reviewedAt": "2026-11-28T20:47:54Z",
+      "updatedAt": "2026-11-28T20:47:54Z",
+      "publishedAt": "2026-11-28T20:47:54Z"
+    },
+    {
+      "id": "ms903/ccusage-stats",
+      "name": "Token usage",
+      "description": "Token usage and cost of your coding agents, including Antigravity",
+      "license": "Apache-2.0",
+      "categories": [
+        "utilities"
+      ],
+      "author": {
+        "github": "ms903"
+      },
+      "repository": {
+        "url": "https://github.com/ms903/paseo-kit",
+        "commit": "4876268aed3520a42e3d69d8939e54c8a5ca6b38"
+      },
+      "artifact": {
+        "kind": "git",
+        "remote": "https://github.com/ms903/paseo-kit.git",
+        "commit": "4876268aed3520a42e3d69d8939e54c8a5ca6b38",
+        "pluginPath": "plugins/ccusage-stats"
+      },
+      "media": [
+        "https://raw.githubusercontent.com/ms903/paseo-kit/4876268aed3520a42e3d69d8939e54c8a5ca6b38/plugins/ccusage-stats/assets/screenshot.png",
+        "https://raw.githubusercontent.com/ms903/paseo-kit/4876268aed3520a42e3d69d8939e54c8a5ca6b38/plugins/ccusage-stats/assets/details.png"
+      ],
+      "submittedAt": "2026-11-28T20:47:52Z",
+      "reviewedAt": "2026-11-28T20:47:52Z",
+      "updatedAt": "2026-11-28T20:47:52Z",
+      "publishedAt": "2026-11-28T20:47:52Z"
+    },
+    {
+      "id": "ms903/file-download",
+      "name": "Download file",
+      "description": "Download the file you are previewing with Cmd+S or Ctrl+S, including files outside the workspace",
+      "license": "Apache-2.0",
+      "categories": [
+        "utilities"
+      ],
+      "author": {
+        "github": "ms903"
+      },
+      "repository": {
+        "url": "https://github.com/ms903/paseo-kit",
+        "commit": "4e2d90789a5b919cba127b565e898b283bb63cd8"
+      },
+      "artifact": {
+        "kind": "git",
+        "remote": "https://github.com/ms903/paseo-kit.git",
+        "commit": "4e2d90789a5b919cba127b565e898b283bb63cd8",
+        "pluginPath": "plugins/file-download"
+      },
+      "media": [],
+      "submittedAt": "2026-11-27T20:52:35Z",
+      "reviewedAt": "2026-11-27T20:52:35Z",
+      "updatedAt": "2026-11-27T20:52:35Z",
+      "publishedAt": "2026-11-27T20:52:35Z"
+    },
+    {
+      "id": "ms903/heartbeat-status",
+      "name": "Heartbeat Status",
+      "description": "Shows which Paseo agents have an active heartbeat, including heartbeats on descendant agents.",
+      "license": "Apache-2.0",
+      "categories": [
+        "utilities"
+      ],
+      "author": {
+        "github": "ms903"
+      },
+      "repository": {
+        "url": "https://github.com/ms903/paseo-kit",
+        "commit": "bad4dbabce6e23abf8fe52021e00efe83e5cf515"
+      },
+      "artifact": {
+        "kind": "git",
+        "remote": "https://github.com/ms903/paseo-kit.git",
+        "commit": "bad4dbabce6e23abf8fe52021e00efe83e5cf515",
+        "pluginPath": "plugins/heartbeat-status"
+      },
+      "media": [],
+      "submittedAt": "2026-11-27T22:00:44Z",
+      "reviewedAt": "2026-11-27T22:00:44Z",
+      "updatedAt": "2026-11-27T22:00:44Z",
+      "publishedAt": "2026-11-27T22:00:44Z"
+    },
+    {
+      "id": "ms903/host-monitor",
+      "name": "Host monitor",
+      "description": "CPU, memory, GPU, disk and network usage of the daemon host in the sidebar footer",
+      "license": "Apache-2.0",
+      "categories": [
+        "utilities"
+      ],
+      "author": {
+        "github": "ms903"
+      },
+      "repository": {
+        "url": "https://github.com/ms903/paseo-kit",
+        "commit": "4e2d90789a5b919cba127b565e898b283bb63cd8"
+      },
+      "artifact": {
+        "kind": "git",
+        "remote": "https://github.com/ms903/paseo-kit.git",
+        "commit": "4e2d90789a5b919cba127b565e898b283bb63cd8",
+        "pluginPath": "plugins/host-monitor"
+      },
+      "media": [
+        "https://raw.githubusercontent.com/ms903/paseo-kit/4e2d90789a5b919cba127b565e898b283bb63cd8/plugins/host-monitor/assets/screenshot.png"
+      ],
+      "submittedAt": "2026-11-27T20:52:41Z",
+      "reviewedAt": "2026-11-27T20:52:41Z",
+      "updatedAt": "2026-11-27T20:52:41Z",
+      "publishedAt": "2026-11-27T20:52:41Z"
+    },
+    {
+      "id": "ms903/media-studio",
+      "name": "Media studio",
+      "description": "Review the images, video and audio your agents make: inline cards in the chat, a player with a filmstrip and waveform timeline, and uploads and downloads of large files",
+      "license": "Apache-2.0",
+      "categories": [
+        "utilities"
+      ],
+      "author": {
+        "github": "ms903"
+      },
+      "repository": {
+        "url": "https://github.com/ms903/paseo-kit",
+        "commit": "4e2d90789a5b919cba127b565e898b283bb63cd8"
+      },
+      "artifact": {
+        "kind": "git",
+        "remote": "https://github.com/ms903/paseo-kit.git",
+        "commit": "4e2d90789a5b919cba127b565e898b283bb63cd8",
+        "pluginPath": "plugins/media-studio"
+      },
+      "media": [],
+      "submittedAt": "2026-11-27T20:52:39Z",
+      "reviewedAt": "2026-11-27T20:52:39Z",
+      "updatedAt": "2026-11-27T20:52:39Z",
+      "publishedAt": "2026-11-27T20:52:39Z"
+    },
+    {
+      "id": "ms903/paseo-latex-companion",
+      "name": "LaTeX Companion for Better Paseo",
+      "description": "Render LaTeX inside Better Paseo web and desktop replies. Enable alongside the official Better Paseo plugin.",
+      "categories": [
+        "utilities"
+      ],
+      "author": {
+        "github": "ms903"
+      },
+      "repository": {
+        "url": "https://github.com/ms903/paseo-kit",
+        "commit": "4e2d90789a5b919cba127b565e898b283bb63cd8"
+      },
+      "artifact": {
+        "kind": "git",
+        "remote": "https://github.com/ms903/paseo-kit.git",
+        "commit": "4e2d90789a5b919cba127b565e898b283bb63cd8",
+        "pluginPath": "plugins/paseo-latex-companion"
+      },
+      "media": [],
+      "submittedAt": "2026-11-27T20:52:43Z",
+      "reviewedAt": "2026-11-27T20:52:43Z",
+      "updatedAt": "2026-11-27T20:52:43Z",
+      "publishedAt": "2026-11-27T20:52:43Z"
+    },
+    {
+      "id": "ms903/tab-recovery",
+      "name": "Closed agents",
+      "description": "Reopen agent tabs that were closed, and so archived, by accident",
+      "license": "Apache-2.0",
+      "categories": [
+        "utilities"
+      ],
+      "author": {
+        "github": "ms903"
+      },
+      "repository": {
+        "url": "https://github.com/ms903/paseo-kit",
+        "commit": "4e2d90789a5b919cba127b565e898b283bb63cd8"
+      },
+      "artifact": {
+        "kind": "git",
+        "remote": "https://github.com/ms903/paseo-kit.git",
+        "commit": "4e2d90789a5b919cba127b565e898b283bb63cd8",
+        "pluginPath": "plugins/tab-recovery"
+      },
+      "media": [],
+      "submittedAt": "2026-11-27T20:52:37Z",
+      "reviewedAt": "2026-11-27T20:52:37Z",
+      "updatedAt": "2026-11-27T20:52:37Z",
+      "publishedAt": "2026-11-27T20:52:37Z"
+    }
+  ],
+  "featured": [],
+  "generatedAt": "2026-11-28T20:47:54.000Z"
+}

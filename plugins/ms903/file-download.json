@@ -1,0 +1,28 @@
+{
+  "id": "ms903/file-download",
+  "name": "Download file",
+  "description": "Download the file you are previewing with Cmd+S or Ctrl+S, including files outside the workspace",
+  "license": "Apache-2.0",
+  "categories": [
+    "utilities"
+  ],
+  "author": {
+    "github": "ms903"
+  },
+  "repository": {
+    "url": "https://github.com/ms903/paseo-kit",
+    "commit": "4e2d90789a5b919cba127b565e898b283bb63cd8"
+  },
+  "artifact": {
+    "kind": "git",
+    "remote": "https://github.com/ms903/paseo-kit.git",
+    "commit": "4e2d90789a5b919cba127b565e898b283bb63cd8",
+    "pluginPath": "plugins/file-download"
+  },
+  "media": [],
+  "submittedAt": "2026-11-27T20:52:35Z",
+  "reviewedAt": "2026-11-27T20:52:35Z",
+  "updatedAt": "2026-11-27T20:52:35Z",
+  "publishedAt": "2026-11-27T20:52:35Z",
+  "readme": "Download the file you are previewing with Cmd+S or Ctrl+S, including files outside the workspace\n\nVersion 0.1.1. [Plugin documentation](https://github.com/ms903/paseo-kit/tree/4e2d90789a5b919cba127b565e898b283bb63cd8/plugins/file-download)"
+}
