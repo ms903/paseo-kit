@@ -75,11 +75,13 @@ function Preview({ theme, hostId, scope, item, rootConversationId }: {
   };
   const insert = async () => {
     if (!data || !composer) return;
+    const reference = t("reference", { path: JSON.stringify(data.absolutePath) });
+    const errorMessage = t("insertError");
     try {
+      composer.insertText(`\n${reference}\n`);
       await composer.focus();
-      composer.insertText(`\n${t("reference", { path: JSON.stringify(data.absolutePath) })}\n`);
     } catch {
-      toast.show(t("insertError"));
+      toast.show(errorMessage);
     }
   };
   return (
