@@ -61,6 +61,11 @@ export const usageReportSchema = z.object({
   daily: z.array(periodSchema),
   weekly: z.array(periodSchema),
   monthly: z.array(periodSchema),
+  /** Calendar dates already scanned on this daemon. Empty days are included. */
+  activity: z.array(z.object({
+    day: z.iso.date(),
+    sources: z.array(z.object({ agent: z.string(), tokens: z.number().nonnegative() })),
+  })).max(366).optional(),
   total: periodSchema.optional(),
   recentSessions: z.array(sessionSchema),
   sessionRefreshError: z.string().nullable().optional(),
@@ -154,6 +159,7 @@ export const sessionListRpc = defineRpc({
     search: z.string().max(120).optional(),
     since: z.iso.date().optional(),
     until: z.iso.date().optional(),
+    sort: z.literal("tokens").optional(),
     offset: z.int().nonnegative().optional(),
   }),
   output: z.object({
@@ -192,4 +198,9 @@ export function addUsage(a: Usage, b: Usage): Usage {
     totalTokens: a.totalTokens + b.totalTokens,
     cost: a.cost === null || b.cost === null ? null : a.cost + b.cost,
   };
+}
+
+export function cacheHitRate(usage: Usage): number | null {
+  const prompt = usage.inputTokens + usage.cacheCreationTokens + usage.cacheReadTokens;
+  return prompt > 0 ? usage.cacheReadTokens / prompt : null;
 }

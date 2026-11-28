@@ -87,10 +87,7 @@ export function useSessionUsage(hostId: string, agentId: string) {
   return { query, refresh };
 }
 
-export function cacheHitRate(usage: Usage): number | null {
-  const prompt = usage.inputTokens + usage.cacheCreationTokens + usage.cacheReadTokens;
-  return prompt > 0 ? usage.cacheReadTokens / prompt : null;
-}
+export { cacheHitRate } from "../shared/usage";
 
 // Days before today that define a typical day for the sidebar meter: four weeks, so weekly rhythms
 // even out and enough active days remain once idle ones are skipped.
@@ -151,10 +148,10 @@ export function typicalDay(daily: readonly UsagePeriod[]): TypicalDay | null {
   };
 }
 
-// Same Carbon series order on both themes: purple, cyan, teal, magenta.
-// https://www.ibm.com/design/language/color/
-const LIGHT_SERIES = ["#6929C4", "#0072C3", "#005D5D", "#9F1853"] as const;
-const DARK_SERIES = ["#BE95FF", "#33B1FF", "#3DDBD9", "#FF7EB6"] as const;
+// Muted blue, amber, teal and mauve, with the same series order in both themes.
+// Adapted from the Tableau categorical palette documented by D3.
+const LIGHT_SERIES = ["#5076A0", "#AA6F39", "#437F75", "#8C709A"] as const;
+const DARK_SERIES = ["#8CB1D4", "#D8A070", "#72B7A8", "#BF9ABE"] as const;
 
 export function chartColors(theme: PluginTheme): readonly string[] {
   // Paseo supplies the surface itself, including when the user overrides their OS theme.

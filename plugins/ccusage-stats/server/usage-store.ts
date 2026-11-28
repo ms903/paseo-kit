@@ -100,8 +100,9 @@ export function createUsageStore(timezone: string, directory = path.join(paseoHo
     ];
     if (report.total) values.push(report.total);
     if (report.olderSessions) values.push(report.olderSessions);
-    if (report.sessionAgents) values.push(report.sessionAgents);
-    if (report.sessionAgents) values.push(report.sessionAgents);
+    // Prior reports wrote the source index twice into the refresh stamp's hash.
+    if (report.sessionAgents) values.push(report.sessionAgents, report.sessionAgents);
+    if (report.activity) values.push(report.activity);
     return createHash("sha256").update(JSON.stringify(values)).digest("hex");
   }
 

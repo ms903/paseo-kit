@@ -3,24 +3,27 @@ import { useRpc, type PluginScreenProps } from "@getpaseo/plugin/client";
 import { Icon, useToast } from "@getpaseo/plugin/client/react-native";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState, type ReactNode } from "react";
-import {
-  Pressable, ScrollView, Text, View, type PressableStateCallbackType, type TextStyle, type ViewStyle,
-} from "react-native";
+import { Pressable, ScrollView, Text, View, type PressableStateCallbackType, type ViewStyle } from "react-native";
 import { updatePricesRpc, type UsagePeriod, type UsageView } from "../shared/usage";
 import { AgentFilterButton, AgentFilterOptions } from "./agent-filter";
 import { Legend, PERIOD_OPTIONS, PeriodBars, Segmented } from "./charts";
-import { cacheHitRate, SESSION_USAGE_KEY, USAGE_REPORT_KEY, useUsageReport, type UsageReport } from "./data";
+import { ActivityCalendar, MetricCards, ModelBreakdown } from "./dashboard";
+import type { UsageMetric } from "./dashboard-data";
+import { SESSION_USAGE_KEY, USAGE_REPORT_KEY, useUsageReport, type UsageReport } from "./data";
 import {
-  agentLabel, formatCost, formatPercent, formatPeriodLong, formatPeriodRange, formatTokens, periodDateBounds, reportTimeFormatter,
+  agentLabel, formatPeriodLong, formatPeriodRange, formatTokens, periodDateBounds, reportTimeFormatter,
 } from "./format";
 import { filterUsageReport, reportAgentOptions } from "./report-filter";
-import { AgentList, Composition, FONT, TodayUsage, TokenChange } from "./summary";
+import { AgentList, Composition, FONT, TodayUsage } from "./summary";
 import { RefreshUsageButton, UsageRefreshStatus } from "./refresh";
 import { SessionList } from "./session-list";
 
 type HoverState = PressableStateCallbackType & { hovered?: boolean };
 
 const MAX_CONTENT_WIDTH = 1_080;
+const historyTitles: Record<UsageMetric, string> = {
+  tokens: "Token history", cost: "Estimated cost history", output: "Output token history", cache: "Cache hit rate history",
+};
 
 function Panel({
   theme,
@@ -58,7 +61,6 @@ function PeriodOverview({
   kind,
   today,
   period,
-  previous,
   selected,
   count,
   onSelect,
@@ -68,74 +70,51 @@ function PeriodOverview({
   kind: UsageView;
   today: string;
   period: UsagePeriod;
-  previous?: UsagePeriod;
   selected: number;
   count: number;
   onSelect(index: number): void;
   narrow: boolean;
 }) {
-  const { usage } = period;
-  const perMillion = usage.cost !== null && usage.totalTokens > 0 ? usage.cost / (usage.totalTokens / 1_000_000) : null;
   const muted = { fontSize: FONT.body, color: theme.colors.foregroundMuted };
-  const value: TextStyle = {
-    fontSize: narrow ? 28 : 36,
-    fontWeight: "600",
-    color: theme.colors.foreground,
-    fontVariant: ["tabular-nums"],
-  };
   return (
-    <>
-      <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 10 }}>
-        <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
-          <Text accessibilityRole="header" style={{
-            fontSize: narrow ? 21 : 25, fontWeight: "600", color: theme.colors.foreground,
-          }}>
-            {formatPeriodLong(kind, period.period, today)}
-          </Text>
-          {kind === "monthly" ? <Text style={muted}>{formatPeriodRange(kind, period.period, today)}</Text> : null}
-        </View>
-        {kind !== "total" ? (
-          <View style={{ flexDirection: "row", gap: 4 }}>
-            {[
-              { label: "Previous period", icon: "ChevronLeft", index: selected - 1 },
-              { label: "Next period", icon: "ChevronRight", index: selected + 1 },
-            ].map(({ label, icon, index }) => {
-              const disabled = index < 0 || index >= count;
-              return (
-                <Pressable
-                  key={label}
-                  accessibilityRole="button"
-                  accessibilityLabel={label}
-                  accessibilityState={{ disabled }}
-                  disabled={disabled}
-                  onPress={() => onSelect(index)}
-                  style={({ hovered, pressed }: HoverState) => ({
-                    minWidth: 34, minHeight: 34, alignItems: "center", justifyContent: "center",
-                    borderRadius: 7, borderWidth: 1, borderColor: theme.colors.border,
-                    backgroundColor: hovered || pressed ? theme.colors.surface2 : theme.colors.surface0,
-                    opacity: disabled ? 0.4 : 1,
-                  })}
-                >
-                  <Icon name={icon} size={16} color={theme.colors.foreground} />
-                </Pressable>
-              );
-            })}
-          </View>
-        ) : null}
+    <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 10 }}>
+      <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
+        <Text accessibilityRole="header" style={{
+          fontSize: narrow ? 21 : 25, fontWeight: "600", color: theme.colors.foreground,
+        }}>
+          {formatPeriodLong(kind, period.period, today)}
+        </Text>
+        {kind === "monthly" ? <Text style={muted}>{formatPeriodRange(kind, period.period, today)}</Text> : null}
       </View>
-      <View style={{ flexDirection: "row", flexWrap: "wrap", rowGap: 12, columnGap: 28 }}>
-        <View style={{ flexGrow: 1, flexBasis: narrow ? 240 : 350, gap: 3 }}>
-          <Text style={muted}>Total tokens</Text>
-          <Text style={value}>{formatTokens(usage.totalTokens)}</Text>
-          <TokenChange theme={theme} kind={kind} current={usage.totalTokens} previous={previous} />
+      {kind !== "total" ? (
+        <View style={{ flexDirection: "row", gap: 4 }}>
+          {[
+            { label: "Previous period", icon: "ChevronLeft", index: selected - 1 },
+            { label: "Next period", icon: "ChevronRight", index: selected + 1 },
+          ].map(({ label, icon, index }) => {
+            const disabled = index < 0 || index >= count;
+            return (
+              <Pressable
+                key={label}
+                accessibilityRole="button"
+                accessibilityLabel={label}
+                accessibilityState={{ disabled }}
+                disabled={disabled}
+                onPress={() => onSelect(index)}
+                style={({ hovered, pressed }: HoverState) => ({
+                  minWidth: 34, minHeight: 34, alignItems: "center", justifyContent: "center",
+                  borderRadius: 7, borderWidth: 1, borderColor: theme.colors.border,
+                  backgroundColor: hovered || pressed ? theme.colors.surface2 : theme.colors.surface0,
+                  opacity: disabled ? 0.4 : 1,
+                })}
+              >
+                <Icon name={icon} size={16} color={theme.colors.foreground} />
+              </Pressable>
+            );
+          })}
         </View>
-        <View style={{ flexGrow: 1, flexBasis: 165, gap: 3 }}>
-          <Text style={muted}>Cost</Text>
-          <Text style={value}>{formatCost(usage.cost)}</Text>
-          {perMillion !== null ? <Text style={[muted, { fontSize: FONT.caption }]}>{formatCost(perMillion)} per 1M tokens</Text> : null}
-        </View>
-      </View>
-    </>
+      ) : null}
+    </View>
   );
 }
 
@@ -172,8 +151,10 @@ function Body({
   const options = PERIOD_OPTIONS.filter(({ value }) => value === "total" || report[value].length > 0);
   const [pickedKey, setPickedKey] = useState<string | null>(initialPeriod ?? null);
   const [width, setWidth] = useState(0);
+  const [metric, setMetric] = useState<UsageMetric>("tokens");
   const { today, timezone } = report;
   const periods = kind === "total" ? [] : report[kind];
+  const history = kind === "total" ? report.monthly : periods;
   const picked = periods.findIndex(({ period }) => period === pickedKey);
   const selected = picked < 0 ? periods.length - 1 : picked;
   const period = kind === "total" ? report.total : periods[selected];
@@ -187,14 +168,20 @@ function Body({
   const select = (index: number) => {
     setPickedKey(index === periods.length - 1 ? null : periods[index]?.period ?? null);
   };
+  const selectHistory = (index: number) => {
+    if (kind === "total") {
+      setKind("monthly");
+      setPickedKey(history[index].period);
+    } else {
+      select(index);
+    }
+  };
   const changeKind = (next: UsageView) => {
     if (kind !== next) {
       setKind(next);
       setPickedKey(null);
     }
   };
-  const hitRate = period ? cacheHitRate(period.usage) : null;
-  const cacheHit = hitRate === null ? "—" : formatPercent(hitRate);
   const modelCount = period ? new Set(period.agents.flatMap((agent) => agent.models.map((model) => model.model))).size : 0;
   const columnStyle: ViewStyle | undefined = split ? { flex: 1, minWidth: 0 } : undefined;
   const refreshClock = useMemo(() => reportTimeFormatter(timezone, true), [timezone]);
@@ -237,47 +224,56 @@ function Body({
               kind={kind}
               today={today}
               period={period}
-              previous={periods[selected - 1]}
               selected={selected}
               count={periods.length}
               onSelect={select}
               narrow={narrow}
             />
-            {kind !== "total" ? (
+            <MetricCards theme={theme} period={period} kind={kind} previous={periods[selected - 1]}
+              history={history} narrow={narrow} selected={metric} onSelect={setMetric} />
+            {history.length ? (
               <View style={{
                 gap: 10, marginTop: 2, paddingTop: 12,
                 borderTopWidth: 1, borderTopColor: theme.colors.border,
               }}>
-                <Text style={{ fontSize: FONT.body, fontWeight: "600", color: theme.colors.foreground }}>Token history</Text>
+                <Text accessibilityRole="header" style={{ fontSize: FONT.body, fontWeight: "600", color: theme.colors.foreground }}>
+                  {historyTitles[metric]}{kind === "total" ? " · Last 12 months" : ""}
+                </Text>
                 <PeriodBars
                   theme={theme}
-                  kind={kind}
-                  periods={periods}
+                  kind={kind === "total" ? "monthly" : kind}
+                  periods={history}
                   order={report.agents}
                   swatchOrder={unfilteredReport.agents}
                   selected={selected}
-                  onSelect={select}
+                  onSelect={selectHistory}
                   height={narrow ? 108 : 150}
                   labelEvery={kind === "daily" ? 5 : 1}
                   today={today}
                   showScale={width >= 480}
+                  metric={metric}
                 />
-                {agent === null ? <Legend theme={theme} order={report.agents} periods={periods} /> : null}
+                {agent === null && metric !== "cache" ? <Legend theme={theme} order={report.agents} periods={history} /> : null}
               </View>
             ) : null}
           </Panel>
 
-          <View style={{ flexDirection: split ? "row" : "column", alignItems: split ? "flex-start" : "stretch", gap: 14 }}>
-            <Panel theme={theme} title="Token breakdown" detail={`Cache hit rate ${cacheHit}`} style={columnStyle}>
-              <Composition theme={theme} usage={period.usage} />
+          {report.daily.length || report.activity?.length ? (
+            <Panel theme={theme} title="Daily activity" detail={report.historyPending || !report.activity ? "Recent days" : "Last 12 months"}>
+              <ActivityCalendar theme={theme} report={report} width={width} />
             </Panel>
-            <Panel
-              theme={theme}
-              title="By agent"
-              detail={`${period.agents.length} ${period.agents.length === 1 ? "agent" : "agents"} · ${modelCount} ${modelCount === 1 ? "model" : "models"}`}
-              style={columnStyle}
-            >
-              <AgentList theme={theme} order={unfilteredReport.agents} period={period} expandable compact={narrow} />
+          ) : null}
+          <View style={{ flexDirection: split ? "row" : "column", alignItems: split ? "flex-start" : "stretch", gap: 14 }}>
+            <View style={[columnStyle, { gap: 14 }]}>
+              <Panel theme={theme} title="Token breakdown">
+                <Composition theme={theme} usage={period.usage} />
+              </Panel>
+              <Panel theme={theme} title="By agent" detail={`${period.agents.length} ${period.agents.length === 1 ? "agent" : "agents"}`}>
+                <AgentList theme={theme} order={unfilteredReport.agents} period={period} expandable compact={narrow || (split && width < 970)} />
+              </Panel>
+            </View>
+            <Panel theme={theme} title="By model" detail={`${modelCount} ${modelCount === 1 ? "model" : "models"}`} style={columnStyle}>
+              <ModelBreakdown theme={theme} period={period} narrow={narrow} />
             </Panel>
           </View>
         </>
@@ -291,9 +287,9 @@ function Body({
         </Panel>
       ) : null}
 
-      <Panel theme={theme} title="Sessions" detail={agent === null ? undefined : agentLabel(agent)}>
+      <Panel theme={theme} title={kind === "total" ? "Top conversations" : "Sessions"} detail={agent === null ? undefined : agentLabel(agent)}>
         <SessionList theme={theme} hostId={hostId} report={report} agent={agent} swatchOrder={unfilteredReport.agents}
-          clock={clock} narrow={narrow} period={sessionPeriod} />
+          clock={clock} narrow={narrow} period={sessionPeriod} lifetime={kind === "total"} />
       </Panel>
     </View>
   );

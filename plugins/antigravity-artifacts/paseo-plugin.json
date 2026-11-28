@@ -1,0 +1,14 @@
+{
+  "id": "antigravity-artifacts",
+  "name": "Antigravity Artifacts",
+  "description": "Find and preview artifacts from the current Antigravity agent and its Paseo child agents on a Linux daemon.",
+  "requirements": {
+    "paseo": ">=0.18.1"
+  },
+  "translations": {
+    "zh-CN": {
+      "name": "Antigravity 产物",
+      "description": "在 Linux daemon 上查看当前 Antigravity 会话及其 Paseo 子 Agent 的产物。"
+    }
+  }
+}

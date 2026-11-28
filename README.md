@@ -12,7 +12,8 @@
 | [file-download](plugins/file-download) | 用 Ctrl+S 或 Cmd+S 下载当前预览的文件，包括工作区外的预览 | 网页或桌面端；光标位于文件编辑器时继续保存编辑 |
 | [paseo-latex-companion](plugins/paseo-latex-companion) | 在 Better Paseo 接管的 Markdown 正文及表格中排版公式 | 网页或桌面端，同时启用官方 Better Paseo 及其 Markdown 设置 |
 | [host-monitor](plugins/host-monitor) | 在侧边栏查看所选主机的 CPU、内存、磁盘、网络和 GPU 指标 | GPU 指标取决于主机硬件及驱动 |
-| [ccusage-stats](plugins/ccusage-stats) | 查看会话 token 用量、输出速度和估算费用，或按 Agent 来源筛选总报表 | daemon 使用 npm 安装锁定的 ccusage 运行时依赖 |
+| [ccusage-stats](plugins/ccusage-stats) | 按 Agent 来源查看 token 和估算费用趋势、用量日历、模型分布与会话输出速度 | daemon 使用 npm 安装锁定的 ccusage 运行时依赖 |
+| [antigravity-artifacts](plugins/antigravity-artifacts) | 在 Antigravity 会话中查看产物，复制路径或插入输入框 | Linux daemon，Paseo 0.18.1 及以上 |
 
 ## 安装和更新
 
@@ -26,6 +27,7 @@ paseo plugin install git:ms903/paseo-kit:plugins/file-download
 paseo plugin install git:ms903/paseo-kit:plugins/paseo-latex-companion
 paseo plugin install git:ms903/paseo-kit:plugins/host-monitor
 paseo plugin install git:ms903/paseo-kit:plugins/ccusage-stats
+paseo plugin install git:ms903/paseo-kit:plugins/antigravity-artifacts
 ```
 
 已从本仓库安装的插件可以原地更新。以标签恢复为例，先查看更新，再应用并确认当前版本。
@@ -36,7 +38,7 @@ paseo plugin update tab-recovery
 paseo plugin ls
 ```
 
-Windows PowerShell 下，如果七个插件都要使用，下面这段可以一次处理已有和新安装。它会安装缺少的插件，更新来自本仓库的 Git 安装，并列出其他来源的同名安装。
+Windows PowerShell 下，下面这段可以一次处理七个跨平台插件。它会安装缺少的插件，更新来自本仓库的 Git 安装，并列出其他来源的同名安装。
 
 ```powershell
 $installed = @(paseo plugin ls --json | Out-String | ConvertFrom-Json)
@@ -57,6 +59,8 @@ foreach ($id in $plugins) {
 ```
 
 Git 安装跟随记录的来源。若某个插件仍显示其他仓库为来源，请先核对安装记录和设置。需要重现某个版本时，在安装命令后加 `--ref <tag-or-commit>`，或运行 `paseo plugin update <id> --ref <tag-or-commit>`。[Paseo 的 Git 插件安装说明](https://github.com/getpaseo/paseo/blob/v0.18.1/docs/plugins.md#install-a-git-source)
+
+使用 Antigravity Console 管理账号时，可在 **设置 → 侧边栏 → 底部** 关闭 **Antigravity 控制台**，移除额外的 5H／7D 额度行。从原来的账号切换入口继续管理账号。新版 Token Usage 和 Antigravity 产物可按各自的插件路径单独安装。
 
 ## 在 Paseo 内配置
 

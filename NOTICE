@@ -13,5 +13,8 @@ The live turn-speed meter in ccusage-stats includes code from
 Drenalol/paseo-turn-speed, copyright (c) 2026 Bogdan Yanysh, licensed under MIT.
 The upstream license accompanies the plugin.
 
+The Token Usage dashboard and Antigravity Artifacts panel take design inspiration
+from Kel077/paseo-antigravity-console (MIT).
+
 paseo-kit is an independent project and is not affiliated with or endorsed by
 the Paseo authors.

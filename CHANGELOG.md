@@ -1,5 +1,12 @@
 # 更新记录
 
+## Token Usage 0.2.0 与 Antigravity Artifacts 0.1.0
+
+- Token Usage 新增总量、估算费用、输出量和缓存命中率的可切换趋势图。用量日历和可搜索的模型表跟随 Agent 来源筛选。Total 支持按会话累计 token 用量排名。
+- 趋势图采用柔和的蓝、琥珀、青绿和灰紫分类色，适配浅色和深色主题。柱形间距、网格线和选中标记也一并调整。
+- Antigravity Artifacts 在 Linux daemon 上为当前会话及可验证的直接 Paseo 子 Agent 提供只读产物面板。面板支持文本和图片预览，以及复制或插入产物路径。
+- Kit 中的新增插件无需额外额度行。现有 Antigravity Console 可在 Paseo 的侧栏底部设置中关闭 5H／7D 行。
+
 ## Token Usage 0.1.1
 
 新增按 Agent 来源筛选总报表。可单独查看 Codex、OpenCode 等来源的日、周、月和总计，费用、历史图、模型明细和会话列表同步筛选。

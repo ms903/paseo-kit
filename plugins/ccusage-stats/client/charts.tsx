@@ -2,8 +2,9 @@ import type { PluginTheme } from "@getpaseo/plugin";
 import { useState } from "react";
 import { Pressable, Text, View, type LayoutChangeEvent, type PressableStateCallbackType } from "react-native";
 import type { PeriodKind, UsagePeriod, UsageView } from "../shared/usage";
+import { formatMetric, METRIC_LABELS, metricValue, type UsageMetric } from "./dashboard-data";
 import { agentSeriesKey, agentSwatch, foldAgents, OTHER_AGENTS_LABEL, type Swatch } from "./data";
-import { agentLabel, formatPeriodLong, formatPeriodShort, formatTokens } from "./format";
+import { agentLabel, formatPeriodLong, formatPeriodShort } from "./format";
 
 // Thin marks with a hairline of surface between neighbours, so segments read apart without outlines.
 const SEGMENT_GAP = 2;
@@ -207,7 +208,7 @@ export function agentSegments(
   theme: PluginTheme,
   order: readonly string[],
   period: UsagePeriod | undefined,
-  measure: "totalTokens" | "cost" = "totalTokens",
+  measure: "totalTokens" | "cost" | "outputTokens" = "totalTokens",
   swatchOrder = order,
 ): ShareSegment[] {
   if (!period) return [];
@@ -219,8 +220,7 @@ export function agentSegments(
 }
 
 /**
- * Stacked columns, one per period, agents bottom-up in legend order. The selected column is
- * highlighted with a background; pressing a column selects it.
+ * Stacked columns, one per period, with agents bottom-up in legend order.
  */
 export function PeriodBars({
   theme,
@@ -234,6 +234,7 @@ export function PeriodBars({
   labelEvery,
   today,
   showScale = false,
+  metric = "tokens",
 }: {
   theme: PluginTheme;
   kind: PeriodKind;
@@ -247,62 +248,68 @@ export function PeriodBars({
   labelEvery: number;
   today: string;
   showScale?: boolean;
+  metric?: UsageMetric;
 }) {
   const [plotWidth, setPlotWidth] = useState(0);
   const onPlotLayout = (event: LayoutChangeEvent) => setPlotWidth(event.nativeEvent.layout.width);
-  const peak = Math.max(1, ...periods.map((period) => period.usage.totalTokens));
-  const step = 10 ** Math.max(0, Math.floor(Math.log10(peak / 2)));
-  const max = showScale && peak > 1 ? Math.ceil(peak / (2 * step)) * 2 * step : peak;
-  const ticks = max > 1 ? [max, max / 2, 0] : [max, 0];
-  const columnGap = periods.length > 20 ? 3 : 5;
+  const values = periods.map(({ usage }) => metricValue(usage, metric));
+  const peak = Math.max(metric === "cost" ? 0.01 : 1, ...values.map((value) => value ?? 0));
+  const step = 10 ** Math.floor(Math.log10(peak / 2));
+  const max = showScale && metric !== "cache" ? Math.ceil(peak / (2 * step)) * 2 * step : peak;
+  const ticks = max > 1 || metric === "cache" ? [max, max / 2, 0] : [max, 0];
+  const measure = metric === "cost" ? "cost" : metric === "output" ? "outputTokens" : "totalTokens";
+  const barWidth = periods.length > 20 ? "70%" : "56%";
   const lastIndex = periods.length - 1;
   const labelWidth = kind === "monthly" ? 57 : 49;
-  const labelStep = Math.max(labelEvery, Math.ceil(labelWidth * periods.length / (plotWidth || 240)));
+  const slotWidth = (plotWidth || 240) / Math.max(periods.length, 1);
+  const labelStep = Math.max(labelEvery, Math.ceil(labelWidth / slotWidth));
   return (
     <View style={{ flexDirection: "row", gap: 10, paddingTop: showScale ? 5 : 0 }}>
       {showScale ? (
         <View style={{ height: height + 12, marginTop: -6, alignItems: "flex-end", justifyContent: "space-between" }}>
           {ticks.map((tick) => (
             <Text key={tick} style={{ fontSize: 10, lineHeight: 12, fontVariant: ["tabular-nums"], color: theme.colors.foregroundMuted }}>
-              {formatTokens(tick)}
+              {formatMetric(tick, metric)}
             </Text>
           ))}
         </View>
       ) : null}
-      <View onLayout={onPlotLayout} style={{ flex: 1, minWidth: 0, gap: 6 }}>
-        <View style={{ height, flexDirection: "row", gap: columnGap }}>
+      <View onLayout={onPlotLayout} style={{ flex: 1, minWidth: 0, gap: 8 }}>
+        <View style={{ height, flexDirection: "row" }}>
           {(showScale ? ticks : [0]).map((tick) => (
             <View key={tick} pointerEvents="none" style={{
               position: "absolute", top: `${(1 - tick / max) * 100}%`, left: 0, right: 0,
-              height: 1, backgroundColor: theme.colors.border,
+              height: 1, backgroundColor: theme.colors.border, opacity: tick === 0 ? 1 : 0.55,
             }} />
           ))}
           {periods.map((period, index) => {
             const isSelected = index === selected;
-            const barHeight = (period.usage.totalTokens / max) * height;
-            const segments = agentSegments(theme, order, period, "totalTokens", swatchOrder).filter((segment) => segment.value > 0);
+            const value = values[index];
+            const barHeight = ((value ?? 0) / max) * height;
+            const segments = !value ? [] : metric === "cache"
+              ? [{ key: "cache", value, swatch: { color: theme.colors.accent, opacity: 1 } }]
+              : agentSegments(theme, order, period, measure, swatchOrder).filter((segment) => segment.value > 0);
             return (
               <Pressable
                 key={period.period}
                 accessibilityRole="button"
                 accessibilityState={{ selected: isSelected }}
-                accessibilityLabel={`${formatPeriodLong(kind, period.period, today)}, ${formatTokens(period.usage.totalTokens)} tokens`}
+                accessibilityLabel={`${formatPeriodLong(kind, period.period, today)}, ${METRIC_LABELS[metric]} ${formatMetric(value, metric)}`}
                 onPress={() => onSelect(index)}
-                style={({ hovered }: HoverState) => ({
+                style={({ hovered, pressed }: HoverState) => ({
                   flex: 1,
                   minWidth: 0,
                   justifyContent: "flex-end" as const,
-                  borderRadius: 3,
-                  backgroundColor: isSelected || hovered ? theme.colors.surface2 : undefined,
+                  alignItems: "center" as const,
+                  borderRadius: 4,
+                  backgroundColor: hovered || pressed ? theme.colors.surface2 : undefined,
                 })}
               >
-                {segments.length === 0 ? (
-                  <View style={{ height: 2, backgroundColor: isSelected ? theme.colors.accent : theme.colors.border }} />
-                ) : (
+                {segments.length ? (
                   <View style={{
-                    height: Math.max(barHeight, 3), flexDirection: "column-reverse",
+                    width: barWidth, maxWidth: 42, height: Math.max(barHeight, 2), flexDirection: "column-reverse",
                     gap: barHeight > segments.length * 4 ? 1 : 0,
-                    borderTopLeftRadius: 3, borderTopRightRadius: 3, overflow: "hidden",
+                    borderTopLeftRadius: 4, borderTopRightRadius: 4, overflow: "hidden",
                   }}>
                     {segments.map((segment) => (
                       <View key={segment.key} style={{
@@ -311,14 +318,18 @@ export function PeriodBars({
                       }} />
                     ))}
                   </View>
-                )}
+                ) : null}
+                {isSelected ? (
+                  <View pointerEvents="none" style={{ position: "absolute", bottom: -3, height: 2,
+                    width: "48%", maxWidth: 16, borderRadius: 1, backgroundColor: theme.colors.accent }} />
+                ) : null}
               </Pressable>
             );
           })}
         </View>
-        <View style={{ flexDirection: "row", gap: columnGap, minHeight: 13 }}>
+        <View style={{ flexDirection: "row", minHeight: 13 }}>
           {periods.map((period, index) => {
-            const position = index === 0 ? "left" : index === lastIndex ? "right" : "center";
+            const position = slotWidth >= labelWidth ? "center" : index === 0 ? "left" : index === lastIndex ? "right" : "center";
             const labelled = index === selected || (
               (lastIndex - index) % labelStep === 0 && Math.abs(index - selected) >= labelStep
             );
