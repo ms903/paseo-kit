@@ -6,21 +6,21 @@
 
 以下用法在 Paseo 0.18.1 上验证。Kit 注册表地址为 `https://raw.githubusercontent.com/ms903/paseo-kit/plugin-registry`。
 
-在启动目标 daemon 的环境中设置 `PASEO_PLUGIN_REGISTRY`，然后在空闲时重启该 daemon。使用 systemd 时，把变量加到实际启动该 daemon 的服务。使用 Paseo CLI 管理 daemon 时，可以这样启动默认实例。
+在空闲时，通过 `paseo daemon run` 启动目标 daemon，并设置 `PASEO_PLUGIN_REGISTRY`。使用 systemd 时，把变量加到运行 `paseo daemon run` 的服务环境。对于默认实例，可以先停止旧进程，再临时启动一次。
 
 ```sh
 paseo daemon stop
-PASEO_PLUGIN_REGISTRY=https://raw.githubusercontent.com/ms903/paseo-kit/plugin-registry paseo daemon start
+PASEO_PLUGIN_REGISTRY=https://raw.githubusercontent.com/ms903/paseo-kit/plugin-registry paseo daemon run
 ```
 
-在 Paseo 的插件浏览页确认能找到 Kit 的发布条目。新安装从该目录选择插件，或在同一台 daemon 上运行对应的命令。
+保持这个进程运行，再从 Paseo 插件浏览页选择 Kit 插件，或在另一终端运行对应的命令。
 
 ```sh
 paseo plugin add ms903/ccusage-stats
 paseo plugin update ccusage-stats --check
 ```
 
-注册表安装会记住完整的目录地址。装完需要的 Kit 插件后，可以移除 `PASEO_PLUGIN_REGISTRY` 并重启 daemon，恢复官方目录的浏览入口。已经通过 Kit 注册表安装的插件仍从 Kit 获取各自的更新。
+注册表安装会记住完整的目录地址。装完需要的 Kit 插件后，可以移除 `PASEO_PLUGIN_REGISTRY` 并重启 daemon，恢复官方目录的浏览入口。临时前台运行的实例可以用 Ctrl+C 退出，再用常规的 `paseo daemon start` 启动。已通过 Kit 注册表安装的插件仍从 Kit 获取各自的更新。
 
 ## 迁移已安装的插件
 
