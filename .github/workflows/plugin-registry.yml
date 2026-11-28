@@ -1,0 +1,57 @@
+name: Publish plugin registry
+
+on:
+  release:
+    types: [published, unpublished, deleted]
+  workflow_dispatch:
+
+concurrency:
+  group: plugin-registry
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - name: Resolve published releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            --jq '.[] | {tagName: .tag_name, publishedAt: .published_at, isDraft: .draft, isPrerelease: .prerelease}' \
+            > "$RUNNER_TEMP/plugin-releases.jsonl"
+          git fetch --tags origin
+          node scripts/build-plugin-registry.mjs "$RUNNER_TEMP/kit-registry" < "$RUNNER_TEMP/plugin-releases.jsonl"
+      - name: Publish the registry branch
+        run: |
+          registry_tree="$RUNNER_TEMP/plugin-registry-tree"
+          registry_branch=plugin-registry
+          registry_ref="refs/remotes/origin/$registry_branch"
+          if git show-ref --verify --quiet "$registry_ref"; then
+            git worktree add --detach "$registry_tree" "$registry_ref"
+            git -C "$registry_tree" rm -r --ignore-unmatch -- index.json plugins
+          else
+            git worktree add --detach --no-checkout "$registry_tree" HEAD
+            git -C "$registry_tree" switch --orphan "$registry_branch"
+          fi
+          cp -a "$RUNNER_TEMP/kit-registry/." "$registry_tree/"
+          git -C "$registry_tree" add -- index.json plugins
+          if git -C "$registry_tree" diff --cached --quiet; then
+            exit 0
+          fi
+          git -C "$registry_tree" \
+            -c user.name='github-actions[bot]' \
+            -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+            commit -m 'Update Paseo Kit plugin pins'
+          git -C "$registry_tree" push origin "HEAD:refs/heads/$registry_branch"

@@ -2,7 +2,7 @@
 
 [中文](README.md) · [Maintainer guide (Chinese)](docs/maintenance.md) · [Changelog](CHANGELOG.md)
 
-ms903 maintains this collection against **Paseo 0.18.1**. Each plugin has its own installation and update history. Existing Git installations keep their plugin IDs and paths. [Host release](https://github.com/getpaseo/paseo/releases/tag/v0.18.1)
+ms903 maintains this collection against **Paseo 0.18.1**. Plugins installed through the Kit registry follow their individual published releases. [Host release](https://github.com/getpaseo/paseo/releases/tag/v0.18.1)
 
 | Plugin | Purpose |
 | --- | --- |
@@ -16,6 +16,8 @@ ms903 maintains this collection against **Paseo 0.18.1**. Each plugin has its ow
 | [antigravity-artifacts](plugins/antigravity-artifacts) | Preview artifacts from the current Antigravity conversation and its Paseo child agents. Requires a Linux daemon and Paseo 0.18.1 or later. |
 
 ## Install and update
+
+Use the Kit registry for independent App update notices. To move an existing Git installation, back up that plugin's daemon settings before switching sources. [Registry setup and migration (Chinese)](docs/plugin-registry.md)
 
 Enable plugins in **Settings → Plugins** on the target daemon. Choose a plugin ID from the table and substitute it for `tab-recovery` in these commands.
 

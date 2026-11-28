@@ -2,7 +2,7 @@
 
 [English](README.en.md) · [维护指南](docs/maintenance.md) · [更新记录](CHANGELOG.md)
 
-这里是 ms903 维护和发布 Paseo 插件的仓库。本轮兼容基线是 **Paseo 0.18.1**。每个插件独立安装和更新，已有安装继续使用原来的插件 ID 和 Git 路径。[Paseo v0.18.1](https://github.com/getpaseo/paseo/releases/tag/v0.18.1)
+这里是 ms903 维护和发布 Paseo 插件的仓库。本轮兼容基线是 **Paseo 0.18.1**。通过 Kit 注册表安装即可按各插件的正式 Release 独立更新。[Paseo v0.18.1](https://github.com/getpaseo/paseo/releases/tag/v0.18.1)
 
 | 插件 | 用途 | 使用条件 |
 | --- | --- | --- |
@@ -16,6 +16,8 @@
 | [antigravity-artifacts](plugins/antigravity-artifacts) | 在 Antigravity 会话中查看产物，复制路径或插入输入框 | Linux daemon，Paseo 0.18.1 及以上 |
 
 ## 安装和更新
+
+需要 App 只提示有新版本的插件时，从 Kit 注册表安装。已有 Git 安装可逐个迁移，先备份对应的 daemon 设置。[注册表安装和迁移](docs/plugin-registry.md)
 
 在目标 daemon 的 **Settings → Plugins** 启用插件。按需运行对应行即可安装。
 

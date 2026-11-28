@@ -51,6 +51,8 @@ paseo plugin logs tab-recovery
 
 插件独立发布。在修改了运行时代码的插件里更新 `package.json` 版本及其锁文件根条目，并在仓库更新记录写明影响与验证范围。验证合并后的提交后，给该插件建立形如 `tab-recovery-v0.1.0` 的标签。Release 说明中写入安装命令、依赖和用户能观察到的变化。
 
+发布正式 GitHub Release 后，**Publish plugin registry** 根据各插件的发布标签更新 `plugin-registry` 分支。注册表安装使用对应插件的提交，普通 Git 安装使用仓库默认分支。[注册表发布和迁移](plugin-registry.md)
+
 下面以标签恢复为例。Git 的 `--ref` 可选择分支、标签或提交。安装时选择某个标签只影响这次选择；以后运行普通的 `update` 仍会检查远端默认分支。
 
 ```sh
